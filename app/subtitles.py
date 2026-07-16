@@ -13,7 +13,22 @@ mirrors the same grouping so what you see matches the export.
 """
 from __future__ import annotations
 
+import re
+
 REFERENCE_WIDTH = 1080  # style.font_size / margins are authored against this
+
+_NBSP = chr(0xA0)  # non-breaking space (U+00A0)
+# French typography: a non-breaking space goes before : ; ? ! » and after «.
+# Only insert it after a real (non-space, non-punctuation) character so we don't
+# split "?!" or add a leading space.
+_NBSP_BEFORE = re.compile(r"([^\s:;?!»«])[ \t]*([:;?!»])")
+_NBSP_AFTER = re.compile(r"(«)[ \t]*([^\s»])")
+
+
+def french_spacing(text: str) -> str:
+    text = _NBSP_BEFORE.sub(r"\1" + _NBSP + r"\2", text)
+    text = _NBSP_AFTER.sub(r"\1" + _NBSP + r"\2", text)
+    return text
 
 
 def _ass_color(hex_color: str, opacity: float = 1.0) -> str:
@@ -154,11 +169,20 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
     t_pos = style.get("translation_position", "below")
+    # French typography: non-breaking spaces around : ; ? ! « ». Applied to the
+    # original line when the video is French, to the translation when it is
+    # translated into French.
+    fr_main = str(project.get("language", "")).lower().startswith("fr")
+    fr_trans = str(project.get("translate_to") or "").lower().startswith("fr")
 
     def styled_translation(text: str) -> str:
+        if not style.get("translation_enabled", True):
+            return ""
         text = text.strip()
         if not text:
             return ""
+        if fr_trans:
+            text = french_spacing(text)
         t_txt = _escape(text.upper() if upper else text)
         return f"{{\\fs{t_fs}\\c{t_color}\\b0}}{t_txt}"
 
@@ -171,7 +195,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     for seg in project["segments"]:
         blocks = blocks_for(seg.get("words", []), style)
         if not blocks:
-            txt = _escape(seg["text"].upper() if upper else seg["text"])
+            raw = french_spacing(seg["text"]) if fr_main else seg["text"]
+            txt = _escape(raw.upper() if upper else raw)
             trans = styled_translation(seg.get("translation", ""))
             events.append(_dialogue(seg["start"], seg["end"], compose(txt, trans)))
             continue
@@ -184,7 +209,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             block_start = flat[0]["start"]
             block_end = flat[-1]["end"]
             if not hl_on:
-                main = _render_block(lines, -1, primary, highlight, upper)
+                main = _render_block(lines, -1, primary, highlight, upper, fr_main)
                 events.append(_dialogue(block_start, block_end, compose(main, trans)))
                 continue
             for gi, word in enumerate(flat):
@@ -192,13 +217,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 end = flat[gi + 1]["start"] if gi + 1 < len(flat) else block_end
                 if end <= start:
                     end = start + 0.05
-                main = _render_block(lines, gi, primary, highlight, upper)
+                main = _render_block(lines, gi, primary, highlight, upper, fr_main)
                 events.append(_dialogue(start, end, compose(main, trans)))
 
     return header + "\n".join(events) + "\n"
 
 
-def _render_block(lines, active_gi, primary, highlight, upper) -> str:
+def _render_block(lines, active_gi, primary, highlight, upper, fr=False) -> str:
     """Render a block (lines joined by \\N); word at global index active_gi is
     coloured with `highlight` (active_gi < 0 = no highlight)."""
     out_lines = []
@@ -206,7 +231,8 @@ def _render_block(lines, active_gi, primary, highlight, upper) -> str:
     for line in lines:
         parts = []
         for word in line:
-            txt = _escape(word["text"].upper() if upper else word["text"])
+            raw = french_spacing(word["text"]) if fr else word["text"]
+            txt = _escape(raw.upper() if upper else raw)
             color = highlight if gi == active_gi else primary
             parts.append(f"{{\\c{color}}}{txt}")
             gi += 1

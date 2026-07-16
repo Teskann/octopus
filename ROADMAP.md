@@ -81,8 +81,8 @@ data/projects/<id>/
 
 - [x] **Phase 1** — Foundation: timestamped transcription + project model + editor shell
 - [x] **Phase 2** — Subtitle rendering, style & bilingual translation
-- [ ] Phase 3 — Transcript correction + image/text overlays
-- [ ] Phase 4 — Timeline & clip selection
+- [x] **Phase 3** — Transcript correction + image/text overlays
+- [x] **Phase 4** — Timeline & clip selection
 - [ ] Phase 5 — Export/render pipeline (ffmpeg)
 - [ ] Phase 6 — Polish
 

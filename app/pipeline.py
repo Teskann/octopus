@@ -27,6 +27,9 @@ def process_project(project_id: str, language: str | None) -> None:
     try:
         _set(project, status="processing", progress=0.05, message="Reading video…")
         info = media.probe_video(video_path)
+        if project.get("scenes"):
+            project["scenes"][0]["width"] = info.width
+            project["scenes"][0]["height"] = info.height
         _set(project, duration=info.duration, width=info.width,
              height=info.height, fps=info.fps,
              progress=0.1, message="Extracting audio…")

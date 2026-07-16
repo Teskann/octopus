@@ -250,3 +250,219 @@ body {
 .controls { display: flex; gap: 1rem; align-items: center; }
 .controls .field { display: flex; align-items: center; gap: 0.5rem; }
 .controls input[type="range"] { accent-color: var(--accent); }
+
+/* ---- Phase 3: editable transcript + overlays --------------------------- */
+.overlay-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none; /* let clicks fall through to the video controls */
+}
+.overlay-layer .ov {
+  position: absolute;
+  pointer-events: auto;
+  cursor: move;
+  user-select: none;
+  touch-action: none;
+}
+.overlay-layer .ov span { font-weight: 800; }
+.overlay-layer .ov img { display: block; border-radius: 4px; }
+
+.tabs { display: flex; gap: 0.4rem; }
+.tab {
+  flex: 1;
+  background: var(--panel); color: var(--muted);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 0.45rem; cursor: pointer; font-size: 0.95rem;
+}
+.tab.on { background: #2b3a5f; color: var(--text); border-color: var(--accent); }
+
+.btn.sm { padding: 0.3rem 0.6rem; font-size: 0.9rem; }
+.link.danger { color: var(--err); }
+.link:disabled { opacity: 0.4; cursor: default; }
+
+.seg.editing { flex-direction: column; align-items: stretch; background: #22304f; }
+.seg-edit { display: flex; flex-direction: column; gap: 0.4rem; width: 100%; }
+.seg-edit textarea, .seg-edit .trans-input {
+  width: 100%; background: #0f172a; color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 0.4rem 0.5rem;
+  font-family: inherit; font-size: 1rem; resize: vertical;
+}
+.seg-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.seg-text { cursor: text; }
+
+.overlay-panel {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 14px; padding: 0.8rem 1rem 1rem;
+}
+.overlay-panel h3 { margin: 0.2rem 0 0.6rem; }
+.ov-add { display: flex; gap: 0.5rem; margin-bottom: 0.8rem; }
+.ov-list { display: flex; flex-direction: column; gap: 0.7rem; }
+.ov-item {
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 0.6rem; display: flex; flex-direction: column; gap: 0.5rem;
+}
+.ov-item input:not([type="range"]):not([type="color"]) {
+  width: 100%; background: #0f172a; color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem 0.5rem;
+  font-family: inherit; font-size: 0.95rem;
+}
+.ov-item-head { display: flex; justify-content: space-between; align-items: center; }
+.ov-row { display: flex; align-items: center; gap: 0.6rem; }
+.ov-row label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.82rem; color: var(--muted); flex: 1; }
+.ov-row input[type="range"] { accent-color: var(--accent); }
+.ov-row input[type="color"] { width: 44px; height: 34px; border: 1px solid var(--border); border-radius: 6px; background: none; }
+
+/* selection, inline edit, resize handle, box */
+.overlay-layer .ov.selected { outline: 2px dashed var(--accent-2); outline-offset: 3px; }
+.overlay-layer .ov .ov-text { cursor: move; }
+.overlay-layer .ov-edit {
+  border: none; outline: 2px solid var(--accent);
+  background: rgba(0, 0, 0, 0.35); color: inherit; font-weight: 800;
+  resize: none; min-width: 90px; line-height: 1.1; padding: 2px 4px; overflow: hidden;
+}
+.overlay-layer .ov-handle {
+  position: absolute; right: -8px; bottom: -8px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--accent); border: 2px solid #fff; cursor: nwse-resize; pointer-events: auto;
+}
+.ov-item { cursor: pointer; }
+.ov-item.selected { border-color: var(--accent); background: #22304f; }
+.ov-check { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; color: var(--muted); }
+.ov-full { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.82rem; color: var(--muted); }
+.ov-item select {
+  width: 100%; background: #0f172a; color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 0.35rem 0.5rem; font-size: 0.95rem;
+}
+
+/* ---- Phase 4: timeline + clips ----------------------------------------- */
+.accent { color: var(--accent-2); }
+
+.timeline { display: flex; flex-direction: column; gap: 0.3rem; }
+.tl-track {
+  position: relative;
+  height: 46px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+}
+.tl-clip {
+  position: absolute; top: 3px; bottom: 3px;
+  background: rgba(99, 102, 241, 0.35);
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  overflow: hidden; white-space: nowrap;
+  display: flex; align-items: center;
+  padding: 0 6px; font-size: 0.8rem; color: var(--text);
+  min-width: 6px;
+}
+.tl-clip.sel { background: rgba(99, 102, 241, 0.6); box-shadow: 0 0 0 1px var(--accent-2) inset; }
+.tl-sel {
+  position: absolute; top: 0; bottom: 0;
+  background: rgba(129, 140, 248, 0.25);
+  border-left: 2px solid var(--accent-2); border-right: 2px solid var(--accent-2);
+  pointer-events: none;
+}
+.tl-playhead {
+  position: absolute; top: 0; bottom: 0; width: 2px;
+  background: #f8fafc; box-shadow: 0 0 4px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+.tl-labels { display: flex; justify-content: space-between; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+
+.tl-menu {
+  position: fixed; z-index: 50;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5); padding: 0.3rem;
+}
+.tl-menu button {
+  background: none; border: none; color: var(--text);
+  padding: 0.5rem 0.8rem; width: 100%; text-align: left; cursor: pointer; border-radius: 6px; font-size: 0.95rem;
+}
+.tl-menu button:hover { background: #2b3a5f; }
+
+.aspect-guide {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  border: 2px dashed rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
+.clip-panel {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 14px; padding: 0.8rem 1rem 1rem;
+}
+.clip-panel h3 { margin: 0.2rem 0 0.6rem; }
+.clip-list { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.8rem; }
+.clip-item {
+  display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
+  border: 1px solid var(--border); border-radius: 8px; padding: 0.45rem 0.6rem; cursor: pointer;
+}
+.clip-item.selected { border-color: var(--accent); background: #22304f; }
+.clip-name { font-weight: 600; }
+.clip-edit { display: flex; flex-direction: column; gap: 0.6rem; }
+.clip-edit > input {
+  width: 100%; background: #0f172a; color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; padding: 0.4rem 0.5rem; font-size: 1rem;
+}
+.clip-actions { display: flex; justify-content: space-between; align-items: center; }
+
+/* ---- Project reframe window + clip-from-transcript --------------------- */
+.reframe-layer { position: absolute; inset: 0; pointer-events: none; }
+.reframe-box {
+  position: absolute;
+  border: 2px dashed rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+.reframe-box.editable { pointer-events: auto; cursor: move; }
+.reframe-handle {
+  position: absolute; right: -9px; bottom: -9px;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--accent); border: 2px solid #fff; cursor: nwse-resize; pointer-events: auto;
+}
+/* marks the segment chosen as a clip's start (awaiting an end) */
+.seg.clip-start { box-shadow: inset 3px 0 0 0 var(--accent-2); }
+
+/* ---- Multi-scene B-roll ------------------------------------------------ */
+.scene-overlay { position: absolute; inset: 0; overflow: hidden; background: #000; animation: zoomPunch 0.16s ease-out; }
+/* max-width/height:none is essential: a crop video is sized past 100% to map its
+   crop window, and the .video-frame video rule would otherwise clamp it. */
+.scene-overlay video { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; }
+.scene-bg { object-fit: cover; filter: blur(28px) brightness(0.7); transform: scale(1.12); }
+.scene-fg { object-fit: contain; }
+/* .scene-crop is sized/positioned inline to map its crop window to the frame */
+@keyframes zoomPunch {
+  from { transform: scale(1.12); opacity: 0.5; }
+  to   { transform: scale(1); opacity: 1; }
+}
+
+.menu-sep { height: 1px; background: var(--border); margin: 0.3rem 0.25rem; }
+
+.scene-panel {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 14px; padding: 0.8rem 1rem 1rem;
+}
+.scene-panel h3 { margin: 0.2rem 0 0.4rem; }
+.scene-list { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.6rem; }
+.scene-item {
+  display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;
+  border: 1px solid var(--border); border-radius: 8px; padding: 0.45rem 0.6rem; cursor: pointer;
+}
+.scene-item.selected { border-color: var(--accent); background: #22304f; }
+.scene-edit { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.6rem; }
+.mode-toggle { display: flex; gap: 0.4rem; }
+.mode-toggle button {
+  flex: 1; background: var(--panel); color: var(--muted);
+  border: 1px solid var(--border); border-radius: 8px; padding: 0.4rem; cursor: pointer; font-size: 0.9rem;
+}
+.mode-toggle button.on { background: #2b3a5f; color: var(--text); border-color: var(--accent); }
+
+.stage-controls { display: flex; align-items: center; gap: 0.8rem; }
+.stage-controls .small { font-variant-numeric: tabular-nums; }
+.cut-list { display: flex; flex-direction: column; gap: 0.3rem; }
+.cut-item { display: flex; align-items: center; gap: 0.6rem; font-variant-numeric: tabular-nums; }
+.cut-item .link { min-width: 3rem; }

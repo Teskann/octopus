@@ -184,6 +184,14 @@ export function StylePanel({
         </div>
       )}
 
+      <label className="row checkbox">
+        <input
+          type="checkbox" checked={style.translation_enabled}
+          onChange={(e) => set("translation_enabled", e.target.checked)}
+        />
+        Afficher la traduction
+      </label>
+
       <div className="two">
         <label className="row">
           Taille traduction : {Math.round(style.translation_scale * 100)}%

@@ -30,11 +30,80 @@ export interface Style {
   position: "top" | "middle" | "bottom";
   margin_v: number;
   uppercase: boolean;
+  translation_enabled: boolean;
   translation_scale: number;
   translation_color: string;
   translation_position: "below" | "above";
   max_line_width_pct: number;
   max_lines: number;
+}
+
+export interface OverlayBase {
+  id: string;
+  start: number;
+  end: number;
+  x: number; // normalized 0..1, top-left anchor
+  y: number;
+}
+export interface TextOverlay extends OverlayBase {
+  type: "text";
+  text: string;
+  font_size: number; // px against 1080-wide reference
+  color: string;
+  font: string;
+  shadow: boolean;
+  box_enabled: boolean;
+  box_color: string;
+  box_opacity: number;
+  box_radius: number; // px @1080
+  box_padding: number; // px @1080 (vertical; horizontal is 1.6x)
+}
+export interface ImageOverlay extends OverlayBase {
+  type: "image";
+  asset: string;
+  url: string;
+  scale: number; // width as a fraction of video width
+}
+export type Overlay = TextOverlay | ImageOverlay;
+
+export type Aspect = "original" | "9:16" | "1:1" | "4:5" | "16:9" | "free";
+
+/** Project-level output framing, shared by all clips. (x,y,w,h) is a normalized
+ *  crop window of the source video that becomes the output frame. */
+export type FitMode = "crop" | "fit";
+
+export interface Frame {
+  aspect: Aspect;
+  mode: FitMode; // crop = fill/cover, fit = contain + blur behind
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  blur_bg: boolean;
+}
+
+export interface Scene {
+  id: string;
+  name: string;
+  filename: string;
+  is_main: boolean;
+  width: number;
+  height: number;
+  mode: FitMode;
+  crop: { x: number; y: number; w: number; h: number };
+}
+
+export interface SceneCut {
+  id: string;
+  time: number;
+  scene_id: string;
+}
+
+export interface Clip {
+  id: string;
+  name: string;
+  start: number;
+  end: number;
 }
 
 export type ProjectStatus = "created" | "processing" | "ready" | "error";
@@ -56,6 +125,9 @@ export interface Project {
   translate_progress: number;
   segments: Segment[];
   style: Style;
-  overlays: unknown[];
-  clips: unknown[];
+  frame: Frame;
+  scenes: Scene[];
+  scene_cuts: SceneCut[];
+  overlays: Overlay[];
+  clips: Clip[];
 }

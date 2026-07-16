@@ -47,6 +47,7 @@ def default_style() -> dict:
         "position": "bottom",        # top | middle | bottom
         "margin_v": 220,             # px from the chosen edge
         "uppercase": True,
+        "translation_enabled": True,   # show the translated line at all
         "translation_scale": 0.5,    # translation line size vs original
         "translation_color": "#B7C7FF",
         "translation_position": "below",  # below | above the original line
@@ -60,6 +61,18 @@ def default_style() -> dict:
 def normalize_style(style: dict | None) -> dict:
     """Fill any missing keys from defaults so older projects stay valid."""
     return {**default_style(), **(style or {})}
+
+
+def default_frame() -> dict:
+    """Project-level output framing, shared by every clip. The crop window
+    (x,y,w,h) is a normalized rectangle of the source video that becomes the
+    output; aspect 'free' unlocks the ratio; blur_bg fills any margin."""
+    return {"aspect": "original", "mode": "crop", "x": 0.0, "y": 0.0, "w": 1.0,
+            "h": 1.0, "blur_bg": True}
+
+
+def normalize_frame(frame: dict | None) -> dict:
+    return {**default_frame(), **(frame or {})}
 
 
 def project_dir(project_id: str) -> Path:
@@ -97,8 +110,20 @@ def new_project(name: str, source_filename: str) -> dict:
         "translations": {},
         "segments": [],
         "style": default_style(),
+        "frame": default_frame(),
+        # Synchronized video sources. scenes[0] is the main video (carries the
+        # audio); extra scenes are alternative points of view (muted), shown as
+        # B-roll during a clip. crop is a per-scene reframe window.
+        "scenes": [{
+            "id": "main", "name": "Principale", "filename": source_filename,
+            "is_main": True, "width": 0, "height": 0, "mode": "crop",
+            "crop": {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0},
+        }],
         "overlays": [],
         "clips": [],
+        # Global scene switches: {id, time, scene_id}. The active scene at time t
+        # is the last cut with time <= t (default: the main scene).
+        "scene_cuts": [],
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
     save(project)
@@ -122,6 +147,18 @@ def get(project_id: str) -> dict | None:
         return None
     project = json.loads(path.read_text(encoding="utf-8"))
     project["style"] = normalize_style(project.get("style"))
+    project["frame"] = normalize_frame(project.get("frame"))
+    if not project.get("scenes"):
+        project["scenes"] = [{
+            "id": "main", "name": "Principale",
+            "filename": project.get("source_video", ""), "is_main": True,
+            "width": project.get("width", 0), "height": project.get("height", 0),
+            "mode": "crop", "crop": {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0},
+        }]
+    for sc in project["scenes"]:
+        sc.setdefault("mode", "crop" if sc.get("is_main") else "fit")
+        sc.setdefault("crop", {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0})
+    project.setdefault("scene_cuts", [])
     project.setdefault("translations", {})
     project.setdefault("translate_status", "idle")
     project.setdefault("translate_progress", 0.0)
