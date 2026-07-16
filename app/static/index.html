@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Transcription vidéo</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --card: #1e293b;
+    --accent: #6366f1;
+    --accent-2: #818cf8;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --ok: #22c55e;
+    --err: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(1200px 600px at 50% -10%, #1e293b, var(--bg));
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 18px;
+    line-height: 1.5;
+  }
+  .card {
+    width: min(640px, 92vw);
+    background: var(--card);
+    border: 1px solid #334155;
+    border-radius: 18px;
+    padding: 2.2rem;
+    box-shadow: 0 20px 60px rgba(0,0,0,.45);
+  }
+  h1 { margin: 0 0 .3rem; font-size: 1.7rem; }
+  p.sub { margin: 0 0 1.6rem; color: var(--muted); }
+  .drop {
+    border: 2px dashed #475569;
+    border-radius: 14px;
+    padding: 2.2rem 1.2rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  .drop:hover, .drop.drag { border-color: var(--accent-2); background: #25324a; }
+  .drop .file { color: var(--accent-2); font-weight: 600; word-break: break-all; }
+  label { display: block; margin: 1.3rem 0 .4rem; color: var(--muted); }
+  input[type=text] {
+    width: 100%;
+    padding: .7rem .9rem;
+    font-size: 1rem;
+    border-radius: 10px;
+    border: 1px solid #475569;
+    background: #0f172a;
+    color: var(--text);
+  }
+  button {
+    margin-top: 1.6rem;
+    width: 100%;
+    padding: .9rem;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: white;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+  }
+  button:disabled { opacity: .55; cursor: not-allowed; }
+  .progress-wrap { margin-top: 1.6rem; display: none; }
+  .bar { height: 12px; background: #0f172a; border-radius: 999px; overflow: hidden; }
+  .bar > div {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    transition: width .4s ease;
+  }
+  .status { margin-top: .7rem; color: var(--muted); }
+  .status.err { color: var(--err); }
+  .transcript {
+    display: none;
+    margin-top: 1rem;
+    padding: 1rem 1.1rem;
+    max-height: 320px;
+    overflow-y: auto;
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.6;
+    font-size: 1rem;
+  }
+  .transcript .cursor {
+    display: inline-block;
+    width: .55ch;
+    background: var(--accent-2);
+    animation: blink 1s steps(2, start) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  a.download {
+    display: inline-block;
+    margin-top: 1.2rem;
+    padding: .8rem 1.2rem;
+    background: var(--ok);
+    color: #07210f;
+    font-weight: 700;
+    border-radius: 10px;
+    text-decoration: none;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Transcription vidéo</h1>
+    <p class="sub">Voxtral (local, via llama.cpp). Dépose une vidéo, récupère le texte.</p>
+
+    <div class="drop" id="drop">
+      <div id="dropText">Clique ou glisse une vidéo ici</div>
+      <input type="file" id="file" accept="video/*,audio/*" hidden />
+    </div>
+
+    <label for="lang">Langue (optionnel — détection auto par défaut)</label>
+    <input type="text" id="lang" placeholder="français, english, español…" />
+
+    <button id="go" disabled>Transcrire</button>
+
+    <div class="progress-wrap" id="progressWrap">
+      <div class="bar"><div id="barFill"></div></div>
+      <div class="status" id="status">…</div>
+      <div class="transcript" id="transcript"></div>
+      <a class="download" id="download" style="display:none">⬇ Télécharger la transcription</a>
+    </div>
+  </div>
+
+<script>
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('file');
+const dropText = document.getElementById('dropText');
+const go = document.getElementById('go');
+const progressWrap = document.getElementById('progressWrap');
+const barFill = document.getElementById('barFill');
+const statusEl = document.getElementById('status');
+const transcriptEl = document.getElementById('transcript');
+const download = document.getElementById('download');
+
+let selected = null;
+
+function pick(f) {
+  selected = f;
+  dropText.innerHTML = '<span class="file">' + f.name + '</span>';
+  go.disabled = false;
+}
+
+drop.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => fileInput.files[0] && pick(fileInput.files[0]));
+['dragover','dragenter'].forEach(e => drop.addEventListener(e, ev => {
+  ev.preventDefault(); drop.classList.add('drag');
+}));
+['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => {
+  ev.preventDefault(); drop.classList.remove('drag');
+}));
+drop.addEventListener('drop', ev => ev.dataTransfer.files[0] && pick(ev.dataTransfer.files[0]));
+
+go.addEventListener('click', async () => {
+  if (!selected) return;
+  go.disabled = true;
+  download.style.display = 'none';
+  transcriptEl.style.display = 'none';
+  transcriptEl.textContent = '';
+  progressWrap.style.display = 'block';
+  statusEl.className = 'status';
+  statusEl.textContent = 'Envoi…';
+  barFill.style.width = '0%';
+
+  const fd = new FormData();
+  fd.append('file', selected);
+  fd.append('language', document.getElementById('lang').value.trim());
+
+  let jobId;
+  try {
+    const r = await fetch('/api/transcribe', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error('Upload échoué (' + r.status + ')');
+    jobId = (await r.json()).job_id;
+  } catch (e) {
+    fail(e.message); return;
+  }
+  poll(jobId);
+});
+
+function fail(msg) {
+  statusEl.className = 'status err';
+  statusEl.textContent = '✖ ' + msg;
+  go.disabled = false;
+}
+
+function renderTranscript(text, live) {
+  if (!text) return;
+  const atBottom = transcriptEl.scrollHeight - transcriptEl.scrollTop
+                   - transcriptEl.clientHeight < 40;
+  transcriptEl.style.display = 'block';
+  transcriptEl.textContent = text;
+  if (live) transcriptEl.insertAdjacentHTML('beforeend', '<span class="cursor">&nbsp;</span>');
+  if (atBottom) transcriptEl.scrollTop = transcriptEl.scrollHeight;  // follow new words
+}
+
+async function poll(jobId) {
+  try {
+    const r = await fetch('/api/jobs/' + jobId);
+    const j = await r.json();
+    barFill.style.width = Math.round((j.progress || 0) * 100) + '%';
+    statusEl.className = 'status';
+    statusEl.textContent = j.message || j.status;
+    renderTranscript(j.text, j.status === 'processing' || j.status === 'pending');
+
+    if (j.status === 'done') {
+      download.href = j.download;
+      download.style.display = 'inline-block';
+      go.disabled = false;
+      return;
+    }
+    if (j.status === 'error') { fail(j.error || 'Erreur'); return; }
+  } catch (e) {
+    fail('Perte de connexion'); return;
+  }
+  setTimeout(() => poll(jobId), 600);
+}
+</script>
+</body>
+</html>

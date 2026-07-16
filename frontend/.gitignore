@@ -1,0 +1,6 @@
+node_modules/
+dist/
+*.local
+
+# bundled fonts (fetched via scripts/fetch-fonts.sh)
+public/fonts/*.ttf
