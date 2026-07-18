@@ -16,9 +16,25 @@ import { ScenePanel } from "./ScenePanel";
 import { SceneSourceVideo } from "./SceneSourceVideo";
 import { activeSceneId, cleanCuts, TRANSITION_DUR, TRANSITION_LEAD } from "../scenes";
 import { defaultFrameRect } from "../frame";
+import { formatTime } from "../time";
 import type { Clip, FitMode, Frame, Overlay, Project, Scene, SceneCut, Segment, Style } from "../types";
 
 const REFERENCE_WIDTH = 1080; // style authored against this (matches backend)
+
+type Rect = { x: number; y: number; w: number; h: number };
+
+// Map a crop window onto its container: the video is blown up so the crop
+// sub-rectangle exactly fills the (output-aspect) container, offset to it. Same
+// math as SceneStage / the export, so the preview matches the export.
+function cropMap(c: Rect): CSSProperties {
+  return {
+    position: "absolute",
+    width: `${100 / c.w}%`,
+    height: `${100 / c.h}%`,
+    left: `${(-c.x * 100) / c.w}%`,
+    top: `${(-c.y * 100) / c.h}%`,
+  };
+}
 
 export function Editor({ initial }: { initial: Project }) {
   const [project, setProject] = useState<Project>(initial);
@@ -33,9 +49,16 @@ export function Editor({ initial }: { initial: Project }) {
   const [sceneCuts, setSceneCuts] = useState<SceneCut[]>(initial.scene_cuts);
   const [selectedSceneId, setSelectedSceneId] = useState<string>("main");
   const [playing, setPlaying] = useState(false);
-  const [tab, setTab] = useState<"transcript" | "overlays" | "clips" | "scenes">("transcript");
+  // Right-pane nav. `null` = panel collapsed (click the active tab to hide it).
+  const [tab, setTab] = useState<"subtitles" | "overlays" | "clips" | "scenes" | null>("subtitles");
+  const openTab = (name: "subtitles" | "overlays" | "clips" | "scenes") =>
+    setTab((cur) => (cur === name ? null : name));
   const videoRef = useRef<HTMLVideoElement>(null);
+  const regionRef = useRef<HTMLDivElement>(null);
+  const outerRef = useRef<HTMLDivElement>(null);
   const [videoWidth, setVideoWidth] = useState(0);
+  const [regionWidth, setRegionWidth] = useState(0);
+  const [outer, setOuter] = useState({ w: 0, h: 0 });
   const t = usePlayhead(videoRef);
   const saveTimer = useRef<number>();
   const overlayTimer = useRef<number>();
@@ -52,6 +75,32 @@ export function Editor({ initial }: { initial: Project }) {
     const ro = new ResizeObserver(measure);
     ro.observe(v);
     return () => ro.disconnect();
+  }, []);
+
+  // Measure the output window (frame-region) on screen — captions are authored
+  // against a 1080-wide output, so this drives their scale in both preview modes.
+  useEffect(() => {
+    const el = regionRef.current;
+    if (!el) return;
+    const measure = () => setRegionWidth(el.clientWidth);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Available space for the cropped preview (column width × up to 78vh). Sizing
+  // the frame in JS keeps the OUTPUT aspect exactly (CSS aspect-ratio distorts
+  // when a wide output would be clamped by max-width).
+  useEffect(() => {
+    const el = outerRef.current;
+    if (!el) return;
+    const measure = () => setOuter({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    window.addEventListener("resize", measure);
+    return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
   }, []);
 
   // Track the main video's play state so scene overlays follow it (resyncing
@@ -115,9 +164,6 @@ export function Editor({ initial }: { initial: Project }) {
   );
   const cueIdx = activeCueIndex(cues, t);
   const cue = cueIdx >= 0 ? cues[cueIdx] : null;
-  // Captions size/position against the visible frame (not the whole source),
-  // so the preview matches how they'll sit in the exported clip.
-  const frameScale = videoWidth ? (frame.w * videoWidth) / REFERENCE_WIDTH : 0.4;
   const selectedClip = clips.find((c) => c.id === selectedClipId) || null;
   // Scene shown at the playhead. Query the CLEANED cuts (no self/redundant
   // switches, like the export) shifted by (lead + dur): the CSS crossfade below
@@ -141,6 +187,14 @@ export function Editor({ initial }: { initial: Project }) {
   const previewScene = tab === "scenes" && selectedScene ? selectedScene : activeScene;
   const editingSecondaryCrop =
     tab === "scenes" && !!selectedScene && !selectedScene.is_main && selectedScene.mode === "crop";
+  // Editing the MAIN crop (drag the frame over the full source). Both crop-edit
+  // cases show the whole source + a ReframeBox; every other view shows only the
+  // cropped output (no black bars around it).
+  const editingMainCrop =
+    tab === "scenes" && selectedSceneId === "main" &&
+    frame.mode === "crop" && frame.aspect !== "original";
+  const reframing = editingSecondaryCrop || editingMainCrop;
+  const cropped = !reframing;
 
   // What to composite over the base video: overlay scenes always; the main only
   // in "fit" mode. Except while reframing a secondary scene, where we show its
@@ -161,7 +215,28 @@ export function Editor({ initial }: { initial: Project }) {
   const stageSceneId = stage ? stage.scene.id : null;
   const mainScene = project.scenes.find((s) => s.is_main) || null;
 
-  function updateSceneCrop(id: string, crop: { x: number; y: number; w: number; h: number }) {
+  // Output pixel geometry → the cropped preview's aspect ratio, and the scale
+  // for captions (authored @1080 output) and overlays (authored @1080 source).
+  const outW = frame.w * (project.width || 1920);
+  const outH = frame.h * (project.height || 1080);
+  // Fit the output aspect inside the available space (no distortion, no bars).
+  const croppedSize = (() => {
+    const ratio = outW / outH || 16 / 9;
+    const availW = outer.w || 640;
+    const availH = outer.h || 500;
+    let w = availW;
+    let h = availW / ratio;
+    if (h > availH) { h = availH; w = availH * ratio; }
+    return { width: `${Math.round(w)}px`, height: `${Math.round(h)}px` };
+  })();
+  const captionScale = regionWidth ? regionWidth / REFERENCE_WIDTH : 0.4;
+  // Overlays are positioned in SOURCE coordinates (like the export), so in the
+  // cropped view they live in a crop-mapped layer sized to the whole source.
+  const overlaySourceWidth = cropped
+    ? (regionWidth ? regionWidth / frame.w : 0)
+    : videoWidth;
+
+  function updateSceneCrop(id: string, crop: Rect) {
     updateScenes(project.scenes.map((s) => (s.id === id ? { ...s, crop } : s)));
   }
 
@@ -176,15 +251,17 @@ export function Editor({ initial }: { initial: Project }) {
     }
   }
 
-  const frameRegionStyle: CSSProperties = {
-    position: "absolute",
-    left: `${frame.x * 100}%`,
-    top: `${frame.y * 100}%`,
-    width: `${frame.w * 100}%`,
-    height: `${frame.h * 100}%`,
-    overflow: "hidden",
-    pointerEvents: "none",
-  };
+  const frameRegionStyle: CSSProperties = cropped
+    ? { position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }
+    : {
+        position: "absolute",
+        left: `${frame.x * 100}%`,
+        top: `${frame.y * 100}%`,
+        width: `${frame.w * 100}%`,
+        height: `${frame.h * 100}%`,
+        overflow: "hidden",
+        pointerEvents: "none",
+      };
 
   function updateStyle(patch: Partial<Style>) {
     const next = { ...style, ...patch };
@@ -288,8 +365,13 @@ export function Editor({ initial }: { initial: Project }) {
     setProject(p);
   }
 
-  // Flush all debounced edits to disk now — the export reads the saved
-  // project.json, so everything must be persisted before a render starts.
+  // Everything editable is auto-saved (debounced). `flush` forces every pending
+  // edit to disk immediately — the export reads the saved project.json, so it
+  // must all be persisted before a render starts.
+  const saved = { style, frame, overlays, clips, scenes: project.scenes, scene_cuts: sceneCuts };
+  const savedRef = useRef(saved);
+  savedRef.current = saved;
+
   async function flush() {
     window.clearTimeout(saveTimer.current);
     window.clearTimeout(overlayTimer.current);
@@ -297,15 +379,26 @@ export function Editor({ initial }: { initial: Project }) {
     window.clearTimeout(frameTimer.current);
     window.clearTimeout(cutsTimer.current);
     window.clearTimeout(sceneTimer.current);
-    await api.patchProject(project.id, {
-      style,
-      frame,
-      overlays,
-      clips,
-      scenes: project.scenes,
-      scene_cuts: sceneCuts,
-    });
+    await api.patchProject(project.id, savedRef.current);
   }
+
+  // Safety net: persist the latest edits when leaving the editor (navigating
+  // home) or hiding the tab, so nothing debounced is ever lost.
+  useEffect(() => {
+    const onHide = () => {
+      fetch(`/api/projects/${project.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(savedRef.current),
+        keepalive: true,
+      }).catch(() => {});
+    };
+    window.addEventListener("pagehide", onHide);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      onHide(); // also on unmount (e.g. back to the project list)
+    };
+  }, [project.id]);
 
   function seek(to: number) {
     const v = videoRef.current;
@@ -317,106 +410,153 @@ export function Editor({ initial }: { initial: Project }) {
   const frMain = (project.language || "").toLowerCase().startsWith("fr");
   const frTrans = (project.translate_to || "").toLowerCase().startsWith("fr");
 
+  const videoStyle: CSSProperties = editingSecondaryCrop
+    ? { position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, pointerEvents: "none" }
+    : cropped
+      ? { ...cropMap(frame), objectFit: "fill", maxWidth: "none", maxHeight: "none", opacity: stage ? 0 : 1, pointerEvents: "none" }
+      : { opacity: stage ? 0 : 1, pointerEvents: stage ? "none" : "auto" };
+
   return (
     <div className="editor">
+      {/* LEFT — the transcript, in its own scroll view (search + auto-follow). */}
+      <aside className="transcript-pane">
+        <TranscriptPanel
+          projectId={project.id}
+          segments={project.segments}
+          t={t}
+          onSeek={seek}
+          reload={reload}
+          pendingClipStartId={pendingClipStartId}
+          onStartClip={startClip}
+          onEndClip={endClip}
+          scenes={project.scenes}
+          cuts={sceneCuts}
+          onSceneCut={addSceneCut}
+          withSearch
+          follow={playing}
+        />
+      </aside>
+
+      {/* CENTER — the video preview + timeline. */}
       <section className="stage">
-        <TranslateBar project={project} onUpdate={setProject} />
-        <div className="video-outer">
-          <div className="video-frame">
-          {/* Hidden (but still playing for audio) when a scene is composited or
-              while reframing a secondary, so the raw main never shows around the
-              output window. When reframing a secondary it's taken out of flow so
-              that scene's own video sizes the frame. */}
-          <video
-            ref={videoRef}
-            src={api.videoUrl(project.id)}
-            controls
-            style={
-              editingSecondaryCrop
-                ? { position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, pointerEvents: "none" }
-                : { opacity: stage ? 0 : 1, pointerEvents: stage ? "none" : "auto" }
-            }
-          />
-          {editingSecondaryCrop && selectedScene && (
-            <SceneSourceVideo
-              key={selectedScene.id}
-              projectId={project.id}
-              sceneId={selectedScene.id}
-              t={t}
-              playing={playing}
+        <div
+          ref={outerRef}
+          className="video-outer"
+          onClick={(e) => {
+            if (!cropped) return; // reframe mode keeps native controls
+            if ((e.target as HTMLElement).closest(".ov, .ov-handle")) return;
+            togglePlay();
+          }}
+        >
+          <div className={`video-frame ${cropped ? "cropped" : ""}`} style={cropped ? croppedSize : undefined}>
+            {/* The base <video> is the audio + playhead master. In the cropped
+                view it's positioned to map the crop window (no native controls,
+                which would fall outside the crop); in reframe mode it shows the
+                whole source with controls. preload=auto so it paints on open. */}
+            <video
+              ref={videoRef}
+              src={api.videoUrl(project.id)}
+              preload="auto"
+              controls={reframing}
+              style={videoStyle}
             />
-          )}
-          <OverlayLayer
-            overlays={overlays}
-            t={t}
-            videoWidth={videoWidth}
-            selectedId={selectedOverlayId}
-            onSelect={setSelectedOverlayId}
-            onMove={(id, x, y) => patchOverlay(id, { x, y })}
-            onResize={(id, patch) => patchOverlay(id, patch)}
-            onEditText={(id, text) => patchOverlay(id, { text })}
-          />
-          {editingSecondaryCrop && secFrame && selectedScene ? (
-            <ReframeBox
-              frame={secFrame}
-              sourceW={selectedScene.width}
-              sourceH={selectedScene.height}
-              editable
-              onChange={(patch) => {
-                const c = effCrop(selectedScene);
-                updateSceneCrop(selectedScene.id, {
-                  x: patch.x ?? c.x,
-                  y: patch.y ?? c.y,
-                  w: patch.w ?? c.w,
-                  h: patch.h ?? c.h,
-                });
-              }}
-            />
-          ) : !stage ? (
-            <ReframeBox
-              frame={frame}
-              sourceW={project.width}
-              sourceH={project.height}
-              editable={tab === "scenes" && frame.mode === "crop" && selectedSceneId === "main"}
-              onChange={updateFrame}
-            />
-          ) : null}
-          <div className="frame-region" style={frameRegionStyle}>
-          {/* Every secondary scene stays mounted; only the active one shows and
-              plays. Crossfade handles the transition — no remount, no reload. */}
-          {project.scenes.filter((s) => !s.is_main).map((sc) => (
-            <SceneStage
-              key={sc.id}
-              projectId={project.id}
-              scene={sc}
-              mode={sc.mode}
-              crop={effCrop(sc)}
-              t={t}
-              playing={playing}
-              active={stageSceneId === sc.id}
-            />
-          ))}
-          {frame.mode === "fit" && mainScene && (
-            <SceneStage
-              key="__mainfit"
-              projectId={project.id}
-              scene={mainScene}
-              mode="fit"
-              crop={{ x: frame.x, y: frame.y, w: frame.w, h: frame.h }}
-              t={t}
-              playing={playing}
-              active={stageSceneId === "main"}
-            />
-          )}
-          {cue && !editingSecondaryCrop && (
-            <CaptionBlock style={style} cue={cue} t={t} scale={frameScale} frMain={frMain} frTrans={frTrans} />
-          )}
-          </div>
+            {editingSecondaryCrop && selectedScene && (
+              <SceneSourceVideo
+                key={selectedScene.id}
+                projectId={project.id}
+                sceneId={selectedScene.id}
+                t={t}
+                playing={playing}
+              />
+            )}
+            {cropped ? (
+              <div className="overlay-cropwrap" style={{ ...cropMap(frame), pointerEvents: "none" }}>
+                <OverlayLayer
+                  overlays={overlays}
+                  t={t}
+                  videoWidth={overlaySourceWidth}
+                  selectedId={selectedOverlayId}
+                  onSelect={setSelectedOverlayId}
+                  onMove={(id, x, y) => patchOverlay(id, { x, y })}
+                  onResize={(id, patch) => patchOverlay(id, patch)}
+                  onEditText={(id, text) => patchOverlay(id, { text })}
+                />
+              </div>
+            ) : (
+              <OverlayLayer
+                overlays={overlays}
+                t={t}
+                videoWidth={overlaySourceWidth}
+                selectedId={selectedOverlayId}
+                onSelect={setSelectedOverlayId}
+                onMove={(id, x, y) => patchOverlay(id, { x, y })}
+                onResize={(id, patch) => patchOverlay(id, patch)}
+                onEditText={(id, text) => patchOverlay(id, { text })}
+              />
+            )}
+            {reframing && (
+              editingSecondaryCrop && secFrame && selectedScene ? (
+                <ReframeBox
+                  frame={secFrame}
+                  sourceW={selectedScene.width}
+                  sourceH={selectedScene.height}
+                  editable
+                  onChange={(patch) => {
+                    const c = effCrop(selectedScene);
+                    updateSceneCrop(selectedScene.id, {
+                      x: patch.x ?? c.x,
+                      y: patch.y ?? c.y,
+                      w: patch.w ?? c.w,
+                      h: patch.h ?? c.h,
+                    });
+                  }}
+                />
+              ) : (
+                <ReframeBox
+                  frame={frame}
+                  sourceW={project.width}
+                  sourceH={project.height}
+                  editable
+                  onChange={updateFrame}
+                />
+              )
+            )}
+            <div ref={regionRef} className="frame-region" style={frameRegionStyle}>
+              {/* Every secondary scene stays mounted; only the active one shows and
+                  plays. Crossfade handles the transition — no remount, no reload. */}
+              {project.scenes.filter((s) => !s.is_main).map((sc) => (
+                <SceneStage
+                  key={sc.id}
+                  projectId={project.id}
+                  scene={sc}
+                  mode={sc.mode}
+                  crop={effCrop(sc)}
+                  t={t}
+                  playing={playing}
+                  active={stageSceneId === sc.id}
+                />
+              ))}
+              {frame.mode === "fit" && mainScene && (
+                <SceneStage
+                  key="__mainfit"
+                  projectId={project.id}
+                  scene={mainScene}
+                  mode="fit"
+                  crop={{ x: frame.x, y: frame.y, w: frame.w, h: frame.h }}
+                  t={t}
+                  playing={playing}
+                  active={stageSceneId === "main"}
+                />
+              )}
+              {cue && !editingSecondaryCrop && (
+                <CaptionBlock style={style} cue={cue} t={t} scale={captionScale} frMain={frMain} frTrans={frTrans} />
+              )}
+            </div>
           </div>
         </div>
         <div className="stage-controls">
           <button className="btn sm" onClick={togglePlay}>{playing ? "⏸ Pause" : "▶ Lecture"}</button>
-          <span className="muted small">{fmtTime(t)} / {fmtTime(project.duration)}</span>
+          <span className="muted small">{formatTime(t)} / {formatTime(project.duration)}</span>
         </div>
         <Timeline
           duration={project.duration}
@@ -438,37 +578,28 @@ export function Editor({ initial }: { initial: Project }) {
         </p>
       </section>
 
+      {/* RIGHT — a nav that shows/hides tool panels. */}
       <aside className="side">
-        <StylePanel style={style} onChange={updateStyle} />
-        <div className="tabs">
-          <button className={tab === "transcript" ? "tab on" : "tab"} onClick={() => setTab("transcript")}>
-            Transcription
+        <nav className="side-nav">
+          <button className={tab === "subtitles" ? "nav-btn on" : "nav-btn"} onClick={() => openTab("subtitles")}>
+            <span className="nav-ico">Aa</span>Sous-titres
           </button>
-          <button className={tab === "overlays" ? "tab on" : "tab"} onClick={() => setTab("overlays")}>
-            Incrustations
+          <button className={tab === "overlays" ? "nav-btn on" : "nav-btn"} onClick={() => openTab("overlays")}>
+            <span className="nav-ico">✦</span>Incrustations
           </button>
-          <button className={tab === "clips" ? "tab on" : "tab"} onClick={() => setTab("clips")}>
-            Clips
+          <button className={tab === "clips" ? "nav-btn on" : "nav-btn"} onClick={() => openTab("clips")}>
+            <span className="nav-ico">✂</span>Clips
           </button>
-          <button className={tab === "scenes" ? "tab on" : "tab"} onClick={() => setTab("scenes")}>
-            Scènes
+          <button className={tab === "scenes" ? "nav-btn on" : "nav-btn"} onClick={() => openTab("scenes")}>
+            <span className="nav-ico">🎥</span>Scènes
           </button>
-        </div>
+        </nav>
 
-        {tab === "transcript" && (
-          <TranscriptPanel
-            projectId={project.id}
-            segments={project.segments}
-            t={t}
-            onSeek={seek}
-            reload={reload}
-            pendingClipStartId={pendingClipStartId}
-            onStartClip={startClip}
-            onEndClip={endClip}
-            scenes={project.scenes}
-            cuts={sceneCuts}
-            onSceneCut={addSceneCut}
-          />
+        {tab === "subtitles" && (
+          <>
+            <TranslateBar project={project} onUpdate={setProject} />
+            <StylePanel style={style} onChange={updateStyle} />
+          </>
         )}
         {tab === "overlays" && (
           <OverlayPanel
@@ -531,10 +662,3 @@ export function Editor({ initial }: { initial: Project }) {
     </div>
   );
 }
-
-function fmtTime(s: number): string {
-  const m = Math.floor(s / 60);
-  const sec = Math.floor(s % 60);
-  return `${m}:${sec.toString().padStart(2, "0")}`;
-}
-

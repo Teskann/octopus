@@ -10,12 +10,17 @@ word starts on a leading space) so the UI can do the karaoke highlight.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Callable
 
 from . import config
+
+# whisper-cli prints "... progress =  42%" to stderr when --print-progress is on.
+_PROGRESS_RE = re.compile(r"progress\s*=\s*(\d+)\s*%")
 
 
 class WhisperError(RuntimeError):
@@ -104,8 +109,15 @@ def _tokens_to_words(
     return words
 
 
-def transcribe(wav_path: Path, language: str | None = None) -> tuple[str, list[Segment]]:
-    """Return (detected_language, segments) for a 16 kHz mono WAV."""
+def transcribe(
+    wav_path: Path,
+    language: str | None = None,
+    progress_cb: Callable[[float], None] | None = None,
+) -> tuple[str, list[Segment]]:
+    """Return (detected_language, segments) for a 16 kHz mono WAV.
+
+    ``progress_cb`` (if given) is called with a 0..1 fraction as whisper reports
+    its progress, so the UI's bar can grow during the (long) transcription."""
     if not config.WHISPER_BIN.exists():
         raise WhisperError(
             f"whisper-cli not found at {config.WHISPER_BIN}. "
@@ -123,15 +135,32 @@ def transcribe(wav_path: Path, language: str | None = None) -> tuple[str, list[S
             "-of", str(out_prefix),
             "-t", str(config.WHISPER_THREADS),
             "-l", language or "auto",
-            "-np",                          # no progress prints to stdout
+            "-pp",                          # print progress (parsed for the UI)
         ]
         if config.WHISPER_DTW:
             cmd += ["--dtw", config.WHISPER_DTW]
 
-        proc = subprocess.run(cmd, capture_output=True, text=True)
+        # Stream stdout+stderr so we can parse the running progress percentage.
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1)
+        tail: list[str] = []
+        last_pct = -1
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            tail.append(line)
+            if len(tail) > 40:
+                del tail[0]
+            m = _PROGRESS_RE.search(line)
+            if m and progress_cb is not None:
+                pct = int(m.group(1))
+                if pct != last_pct:
+                    last_pct = pct
+                    progress_cb(pct / 100.0)
+        proc.wait()
         if proc.returncode != 0:
             raise WhisperError(
-                f"whisper-cli failed ({proc.returncode}):\n{proc.stderr[-2000:]}")
+                f"whisper-cli failed ({proc.returncode}):\n{''.join(tail)[-2000:]}")
 
         json_path = out_prefix.with_suffix(".json")
         if not json_path.exists():

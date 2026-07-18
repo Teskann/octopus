@@ -9,6 +9,7 @@ progress updates during processing (single uvicorn worker).
 from __future__ import annotations
 
 import json
+import shutil
 import threading
 import time
 import uuid
@@ -199,6 +200,18 @@ def list_projects() -> list[dict]:
         })
     items.sort(key=lambda x: x["created_at"], reverse=True)
     return items
+
+
+def delete_project(project_id: str) -> bool:
+    """Remove a project's directory and drop it from the cache. Returns False if
+    it did not exist."""
+    pdir = project_dir(project_id)
+    with _LOCK:
+        _CACHE.pop(project_id, None)
+    if not pdir.exists():
+        return False
+    shutil.rmtree(pdir, ignore_errors=True)
+    return True
 
 
 def source_path(project: dict) -> Path:

@@ -1,9 +1,8 @@
 import { useRef, useState } from "react";
 import { api } from "../api";
 import { defaultFrameRect } from "../frame";
+import { formatTime as fmt } from "../time";
 import type { Aspect, Frame, Scene, SceneCut } from "../types";
-
-const fmt = (s: number) => `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
 
 const ASPECTS: { value: Aspect; label: string }[] = [
   { value: "original", label: "Original" },
@@ -45,14 +44,25 @@ export function ScenePanel({
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
 
   async function add(file: File) {
     setBusy(true);
-    try { await api.uploadScene(projectId, file); await onReload(); } finally { setBusy(false); }
+    setUploadPct(0);
+    try {
+      await api.uploadScene(projectId, file, (f) => setUploadPct(Math.round(f * 100)));
+      await onReload();
+    } finally {
+      setBusy(false);
+      setUploadPct(null);
+    }
   }
   async function del(id: string) {
     setBusy(true);
     try { await api.deleteScene(projectId, id); await onReload(); } finally { setBusy(false); }
+  }
+  function rename(id: string, name: string) {
+    onScenesChange(scenes.map((s) => (s.id === id ? { ...s, name } : s)));
   }
 
   const selected = scenes.find((s) => s.id === selectedSceneId) || scenes[0];
@@ -96,7 +106,14 @@ export function ScenePanel({
             className={`scene-item ${s.id === selected?.id ? "selected" : ""}`}
             onClick={() => onSelectScene(s.id)}
           >
-            <span>{s.is_main ? "🎬 " : "🎥 "}{s.name}</span>
+            <span className="scene-swatch" style={{ background: s.color }} title={`Couleur de « ${s.name} »`} />
+            <input
+              className="scene-name-input"
+              value={s.name}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => rename(s.id, e.target.value)}
+              title="Renommer la scène"
+            />
             {!s.is_main && (
               <button className="link danger" disabled={busy} onClick={(e) => { e.stopPropagation(); del(s.id); }}>
                 Supprimer
@@ -106,6 +123,16 @@ export function ScenePanel({
         ))}
       </div>
       <button className="btn sm" disabled={busy} onClick={() => fileRef.current?.click()}>+ Ajouter une scène</button>
+      {uploadPct !== null && (
+        <div className="scene-upload">
+          <div className="progress sm">
+            <div className="bar" style={{ width: `${uploadPct}%` }} />
+          </div>
+          <span className="muted small">
+            {uploadPct < 100 ? `Import… ${uploadPct}%` : "Analyse…"}
+          </span>
+        </div>
+      )}
       <input ref={fileRef} type="file" accept="video/*" hidden
         onChange={(e) => { const f = e.target.files?.[0]; if (f) add(f); e.target.value = ""; }} />
 

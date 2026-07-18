@@ -37,7 +37,16 @@ def process_project(project_id: str, language: str | None) -> None:
         transcription.extract_audio(video_path, wav_path)
 
         _set(project, progress=0.25, message="Transcribing (this can take a while)…")
-        detected, segments = whisper.transcribe(wav_path, language)
+
+        # Grow the bar as whisper works: map its 0..1 onto [0.25, 0.97]. Only
+        # persist on a percentage change (whisper repeats lines) to bound writes.
+        def on_progress(frac: float) -> None:
+            pct = int(frac * 100)
+            _set(project, progress=0.25 + 0.72 * frac,
+                 message=f"Transcribing… {pct}%")
+
+        detected, segments = whisper.transcribe(
+            wav_path, language, progress_cb=on_progress)
 
         seg_dicts = []
         for i, seg in enumerate(segments):

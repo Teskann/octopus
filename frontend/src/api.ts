@@ -1,4 +1,4 @@
-import type { Project, RenderJob, Scene } from "./types";
+import type { Preset, Project, ProjectSummary, RenderJob, Scene, Style } from "./types";
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -13,8 +13,26 @@ export const api = {
     return json(await fetch("/api/projects", { method: "POST", body: form }));
   },
 
+  async listProjects(): Promise<ProjectSummary[]> {
+    return json(await fetch("/api/projects"));
+  },
+
   async getProject(id: string): Promise<Project> {
     return json(await fetch(`/api/projects/${id}`));
+  },
+
+  async renameProject(id: string, name: string): Promise<Project> {
+    return json(
+      await fetch(`/api/projects/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      })
+    );
+  },
+
+  async deleteProject(id: string): Promise<unknown> {
+    return json(await fetch(`/api/projects/${id}`, { method: "DELETE" }));
   },
 
   async patchProject(id: string, patch: Partial<Project>): Promise<Project> {
@@ -79,10 +97,30 @@ export const api = {
     );
   },
 
-  async uploadScene(id: string, file: File): Promise<Scene> {
+  // XHR (not fetch) so we can report upload progress — scene videos are large.
+  uploadScene(id: string, file: File, onProgress?: (frac: number) => void): Promise<Scene> {
     const form = new FormData();
     form.append("file", file);
-    return json(await fetch(`/api/projects/${id}/scenes`, { method: "POST", body: form }));
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `/api/projects/${id}/scenes`);
+      xhr.upload.onprogress = (e) => {
+        if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total);
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText) as Scene);
+          } catch (err) {
+            reject(err);
+          }
+        } else {
+          reject(new Error(`${xhr.status} ${xhr.statusText}`));
+        }
+      };
+      xhr.onerror = () => reject(new Error("network error"));
+      xhr.send(form);
+    });
   },
 
   async deleteScene(id: string, sceneId: string): Promise<Scene[]> {
@@ -101,6 +139,28 @@ export const api = {
 
   async listRenders(id: string): Promise<RenderJob[]> {
     return json(await fetch(`/api/projects/${id}/renders`));
+  },
+
+  async cancelRender(id: string, jobId: string): Promise<RenderJob> {
+    return json(await fetch(`/api/projects/${id}/renders/${jobId}`, { method: "DELETE" }));
+  },
+
+  async listPresets(): Promise<Preset[]> {
+    return json(await fetch("/api/presets"));
+  },
+
+  async savePreset(name: string, style: Style): Promise<Preset> {
+    return json(
+      await fetch("/api/presets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, style }),
+      })
+    );
+  },
+
+  async deletePreset(id: string): Promise<unknown> {
+    return json(await fetch(`/api/presets/${id}`, { method: "DELETE" }));
   },
 
   videoUrl(id: string): string {

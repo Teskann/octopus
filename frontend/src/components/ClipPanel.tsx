@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { formatTime as fmt } from "../time";
 import type { Clip, RenderJob } from "../types";
 
-const fmt = (s: number) => `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, "0")}`;
 const round = (v: number) => Math.round(v * 10) / 10;
 
 export function ClipPanel({
@@ -40,6 +40,15 @@ export function ClipPanel({
     }, 700);
     return () => window.clearInterval(pollRef.current);
   }, [jobs, projectId]);
+
+  async function cancel(jobId: string) {
+    try {
+      await api.cancelRender(projectId, jobId);
+      setJobs(await api.listRenders(projectId));
+    } catch {
+      /* ignore */
+    }
+  }
 
   async function exportClips(ids: string[]) {
     if (busy) return;
@@ -125,10 +134,17 @@ export function ClipPanel({
                 </a>
               ) : j.status === "error" ? (
                 <span className="render-tag error" title={j.error || ""}>Échec</span>
+              ) : j.status === "cancelled" ? (
+                <span className="render-tag cancelled">Annulé</span>
               ) : (
-                <span className="render-bar">
-                  <span className="render-bar-fill" style={{ width: `${Math.round(j.progress * 100)}%` }} />
-                </span>
+                <>
+                  <span className="render-bar">
+                    <span className="render-bar-fill" style={{ width: `${Math.round(j.progress * 100)}%` }} />
+                  </span>
+                  <button className="link danger render-stop" onClick={() => cancel(j.id)} title="Arrêter le rendu">
+                    ✕
+                  </button>
+                </>
               )}
             </div>
           ))}

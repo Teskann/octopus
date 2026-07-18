@@ -2,14 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent } from "react";
 import type { Clip, Scene, SceneCut } from "../types";
 import { cleanCuts } from "../scenes";
+import { formatTime as fmt } from "../time";
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
-
-function fmt(s: number): string {
-  const m = Math.floor(s / 60);
-  const sec = Math.floor(s % 60);
-  return `${m}:${sec.toString().padStart(2, "0")}`;
-}
 
 /** Whole-video timeline: click to seek, drag to select a range, right-click to
  *  generate a clip from the selection (or a default range at the cursor). */

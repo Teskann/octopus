@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { isWordActive } from "../captions";
 import { activeSceneId } from "../scenes";
+import { formatTime } from "../time";
 import type { Scene, SceneCut, Segment } from "../types";
 
 export function TranscriptPanel({
@@ -16,6 +17,8 @@ export function TranscriptPanel({
   scenes,
   cuts,
   onSceneCut,
+  withSearch = false,
+  follow = false,
 }: {
   projectId: string;
   segments: Segment[];
@@ -28,12 +31,16 @@ export function TranscriptPanel({
   scenes: Scene[];
   cuts: SceneCut[];
   onSceneCut: (seg: Segment, sceneId: string) => void;
+  withSearch?: boolean;
+  follow?: boolean;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftText, setDraftText] = useState("");
   const [draftTrans, setDraftTrans] = useState("");
   const [busy, setBusy] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number; seg: Segment } | null>(null);
+  const [query, setQuery] = useState("");
+  const activeRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!menu) return;
@@ -41,6 +48,21 @@ export function TranscriptPanel({
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
   }, [menu]);
+
+  const q = query.trim().toLowerCase();
+  const shown = q
+    ? segments.filter(
+        (s) => s.text.toLowerCase().includes(q) || (s.translation || "").toLowerCase().includes(q)
+      )
+    : segments;
+  const activeId = segments.find((s) => t >= s.start && t < s.end)?.id ?? null;
+
+  // Auto-follow: keep the line at the playhead visible while playing (only when
+  // not searching, so it doesn't fight the user browsing results).
+  useEffect(() => {
+    if (!follow || q) return;
+    activeRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [activeId, follow, q]);
 
   function startEdit(seg: Segment) {
     setEditingId(seg.id);
@@ -77,17 +99,32 @@ export function TranscriptPanel({
 
   return (
     <div className="transcript">
-      <h3>Transcription</h3>
-      <p className="muted small">Cliquez sur un segment pour le corriger.</p>
-      <p className="muted small">Clic droit : démarrer / terminer un clip.</p>
+      <div className="transcript-head">
+        <h3>Transcription</h3>
+        {withSearch && (
+          <input
+            className="transcript-search"
+            type="search"
+            placeholder="Rechercher…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        )}
+        <p className="muted small" title="Clic : aller · Double-clic : corriger · Clic droit : clip / scène">
+          Clic : aller · double-clic : corriger
+          {q ? ` · ${shown.length} résultat${shown.length > 1 ? "s" : ""}` : ""}
+        </p>
+      </div>
       <div className="segments">
-        {segments.map((s, i) => {
+        {shown.map((s) => {
+          const i = segments.indexOf(s);
           const active = t >= s.start && t < s.end;
           const editing = editingId === s.id;
           const isStart = s.id === pendingClipStartId;
           return (
             <div
               key={s.id}
+              ref={active ? activeRef : undefined}
               className={`seg ${active ? "active" : ""} ${editing ? "editing" : ""} ${isStart ? "clip-start" : ""}`}
               onContextMenu={(e) => {
                 e.preventDefault();
@@ -95,7 +132,7 @@ export function TranscriptPanel({
               }}
             >
               <span className="ts" onClick={() => onSeek(s.start)}>
-                {s.start.toFixed(1)}s
+                {formatTime(s.start)}
               </span>
 
               {editing ? (
@@ -143,7 +180,12 @@ export function TranscriptPanel({
                   </div>
                 </div>
               ) : (
-                <span className="seg-text" onClick={() => startEdit(s)}>
+                <span
+                  className="seg-text"
+                  title="Clic : aller à ce passage · double-clic : corriger"
+                  onClick={() => onSeek(s.start)}
+                  onDoubleClick={() => startEdit(s)}
+                >
                   {s.words.length > 0
                     ? s.words.map((w, j) => (
                         <span key={j} className={active && isWordActive(w, t) ? "word on" : "word"}>

@@ -111,7 +111,7 @@ export interface RenderJob {
   id: string;
   clip_id: string;
   clip_name: string;
-  status: "queued" | "running" | "done" | "error";
+  status: "queued" | "running" | "done" | "error" | "cancelled";
   progress: number;
   message: string;
   error: string | null;
@@ -121,6 +121,22 @@ export interface RenderJob {
 }
 
 export type ProjectStatus = "created" | "processing" | "ready" | "error";
+
+/** Lightweight row returned by GET /api/projects (the project list). */
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  status: ProjectStatus;
+  duration: number;
+  created_at: string;
+}
+
+/** A saved caption-style preset (user-created, persisted on the backend). */
+export interface Preset {
+  id: string;
+  name: string;
+  style: Style;
+}
 
 export interface Project {
   id: string;

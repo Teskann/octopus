@@ -90,7 +90,11 @@ data/projects/<id>/
 - [x] **Phase 3** — Transcript correction + image/text overlays
 - [x] **Phase 4** — Timeline & clip selection
 - [x] **Phase 5** — Export/render pipeline (headless-browser "one renderer")
-- [ ] Phase 6 — Polish ← **next**
+- [~] **Phase 6** — Polish ← **in progress**
+  - [x] Project list on the home screen (open / rename / delete)
+  - [x] Caption style presets (built-in looks + save/apply/delete your own)
+  - [ ] Load models on demand to fit VRAM
+  - [ ] Package as a desktop-feeling local app
 
 ## Built beyond the original phases (refinements)
 

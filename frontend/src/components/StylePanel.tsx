@@ -1,4 +1,7 @@
-import type { Style } from "../types";
+import { useEffect, useState } from "react";
+import { api } from "../api";
+import { BUILTIN_PRESETS } from "../presets";
+import type { Preset, Style } from "../types";
 
 // Bundled caption fonts (scripts/fetch-fonts.sh) + families already installed on
 // this machine (fontconfig). All resolve in both the preview and the export.
@@ -25,8 +28,71 @@ export function StylePanel({
   const set = <K extends keyof Style>(key: K, value: Style[K]) =>
     onChange({ [key]: value } as Partial<Style>);
 
+  const [presets, setPresets] = useState<Preset[]>([]);
+  useEffect(() => {
+    api.listPresets().then(setPresets).catch(() => {});
+  }, []);
+
+  async function saveCurrentAsPreset() {
+    const name = window.prompt("Nom du préréglage ?")?.trim();
+    if (!name) return;
+    try {
+      const preset = await api.savePreset(name, style);
+      setPresets((ps) => [...ps, preset]);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function removePreset(id: string) {
+    try {
+      await api.deletePreset(id);
+      setPresets((ps) => ps.filter((p) => p.id !== id));
+    } catch {
+      /* ignore */
+    }
+  }
+
   return (
     <div className="style-panel">
+      <h3>Préréglages</h3>
+      <div className="presets">
+        {BUILTIN_PRESETS.map((p) => (
+          <button
+            key={p.name}
+            type="button"
+            className="preset-chip"
+            title={`Appliquer « ${p.name} »`}
+            onClick={() => onChange(p.style)}
+          >
+            {p.name}
+          </button>
+        ))}
+        {presets.map((p) => (
+          <span key={p.id} className="preset-chip user">
+            <button
+              type="button"
+              className="preset-apply"
+              title={`Appliquer « ${p.name} »`}
+              onClick={() => onChange(p.style)}
+            >
+              {p.name}
+            </button>
+            <button
+              type="button"
+              className="preset-del"
+              title="Supprimer ce préréglage"
+              onClick={() => removePreset(p.id)}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        <button type="button" className="preset-save" onClick={saveCurrentAsPreset}>
+          + Enregistrer le style actuel
+        </button>
+      </div>
+
       <h3>Style des sous-titres</h3>
 
       <label className="row">

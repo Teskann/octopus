@@ -19,6 +19,7 @@ from . import config, render, store
 
 _EXECUTOR = ThreadPoolExecutor(max_workers=max(1, config.EXPORT_CONCURRENCY))
 _JOBS: dict[str, dict] = {}
+_CANCELS: dict[str, threading.Event] = {}
 _LOCK = threading.Lock()
 
 
@@ -59,7 +60,11 @@ def _set(job_id: str, **fields) -> None:
 def _run(job_id: str) -> None:
     with _LOCK:
         job = _JOBS.get(job_id)
+        cancel = _CANCELS.get(job_id)
     if job is None:
+        return
+    if cancel is not None and cancel.is_set():
+        _set(job_id, status="cancelled", message="Annulé")
         return
     _set(job_id, status="running", message="Rendu…")
     try:
@@ -71,10 +76,14 @@ def _run(job_id: str) -> None:
             raise RuntimeError("Clip introuvable")
         out_path = _exports_dir(job["project_id"]) / job["filename"]
         render.render_clip(project, clip, out_path,
-                           progress=lambda f: _set(job_id, progress=round(f, 3)))
+                           progress=lambda f: _set(job_id, progress=round(f, 3)),
+                           cancel=cancel)
         _set(job_id, status="done", progress=1.0, message="Terminé")
     except Exception as exc:  # noqa: BLE001 - surface any failure to the client
-        _set(job_id, status="error", error=str(exc), message="Échec")
+        if cancel is not None and cancel.is_set():
+            _set(job_id, status="cancelled", message="Annulé", error=None)
+        else:
+            _set(job_id, status="error", error=str(exc), message="Échec")
 
 
 def enqueue_clip(project_id: str, clip: dict) -> dict:
@@ -92,8 +101,25 @@ def enqueue_clip(project_id: str, clip: dict) -> dict:
     }
     with _LOCK:
         _JOBS[job["id"]] = job
+        _CANCELS[job["id"]] = threading.Event()
     _EXECUTOR.submit(_run, job["id"])
     return _public(job)
+
+
+def cancel_job(project_id: str, job_id: str) -> dict | None:
+    """Signal a running/queued job to stop. Returns the job's public view."""
+    with _LOCK:
+        job = _JOBS.get(job_id)
+        if job is None or job["project_id"] != project_id:
+            return None
+        cancel = _CANCELS.get(job_id)
+        if cancel is not None:
+            cancel.set()
+        # A still-queued job hasn't reached the worker's own check yet; mark it
+        # now so the UI reflects the stop immediately.
+        if job["status"] in ("queued", "running"):
+            job.update(status="cancelled", message="Annulé", error=None)
+        return _public(job)
 
 
 def enqueue_clips(project_id: str, clips: list[dict]) -> list[dict]:

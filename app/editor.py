@@ -49,6 +49,13 @@ def get_project(project_id: str) -> dict:
     return project
 
 
+@router.delete("/{project_id}")
+def delete_project(project_id: str) -> dict:
+    if not store.delete_project(project_id):
+        raise HTTPException(404, "Unknown project")
+    return {"deleted": project_id}
+
+
 @router.patch("/{project_id}")
 def patch_project(project_id: str, patch: dict) -> dict:
     # Only editable top-level keys may be patched from the client.
@@ -253,6 +260,15 @@ def list_renders(project_id: str) -> list[dict]:
     if store.get(project_id) is None:
         raise HTTPException(404, "Unknown project")
     return exports.list_for(project_id)
+
+
+@router.delete("/{project_id}/renders/{job_id}")
+def cancel_render(project_id: str, job_id: str) -> dict:
+    """Stop a queued/running render job."""
+    job = exports.cancel_job(project_id, job_id)
+    if job is None:
+        raise HTTPException(404, "Unknown render job")
+    return job
 
 
 @router.get("/{project_id}/renders/{job_id}/file")
