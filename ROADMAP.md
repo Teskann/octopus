@@ -83,8 +83,31 @@ data/projects/<id>/
 - [x] **Phase 2** — Subtitle rendering, style & bilingual translation
 - [x] **Phase 3** — Transcript correction + image/text overlays
 - [x] **Phase 4** — Timeline & clip selection
-- [ ] Phase 5 — Export/render pipeline (ffmpeg)
+- [ ] **Phase 5** — Export/render pipeline (ffmpeg) ← **next, not started**
 - [ ] Phase 6 — Polish
+
+## Built beyond the original phases (refinements)
+
+The editor + **live preview** are done; only the ffmpeg **export** is missing.
+On top of Phases 1–4 the following was added (all preview-only until Phase 5
+renders them):
+
+- **Reframing**: project-wide aspect + per-scene crop window (drag/zoom
+  `ReframeBox`) and per-scene **crop vs fit** (fit = contain + blurred fill). When
+  a scene is composited the base video is hidden so the source never shows around
+  the output window.
+- **Multi-scene B-roll**: import extra synchronized (muted) camera angles; switch
+  scenes from the transcript (right-click or per-line color dots); global
+  `scene_cuts`; zoom-punch crossfade; scene colors surfaced in the timeline
+  (bands) and transcript (dots). Stable playback via persistent mounted players +
+  `playbackRate` A/V sync (no flicker, no desync).
+- **Subtitles**: caption box, editable text/translation, French NBSP typography,
+  translation on/off + position, robust translation prompt (no refusals /
+  omissions / Markdown).
+- **UX**: play/pause + time bar, Space play/pause (no page scroll), ←/→ seek ±5s.
+
+Data model additions to remember: `frame` (aspect+mode+crop+blur_bg), `scenes`
+(with mode/crop/color), `scene_cuts`. All migrated in `store.get()`.
 
 ## Notes / trade-offs to revisit
 

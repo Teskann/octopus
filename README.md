@@ -42,15 +42,20 @@ Two processes. Start the model server first (downloads the model on first run):
 
 Open <http://127.0.0.1:8000>, drop a video, download the transcript.
 
-## Video editor (in development)
+## Video editor
 
-A local, opus.pro-style editor is being built on top of this app: drag & drop a
-video → auto bilingual TikTok-style subtitles → correct/style them → add images,
-text, intro/outro → select clips on a timeline → export with everything burned
-in. See [`ROADMAP.md`](ROADMAP.md) for the plan and phases.
+A local, opus.pro-style editor built on top of this app. Drag & drop a video →
+auto **bilingual word-level subtitles** → correct/style them → **reframe** to any
+aspect ratio (crop or blur-fill) → add **image/text overlays** → cut **clips**
+from the transcript → switch between multiple synchronized **camera angles /
+B-roll** scenes. The editor and its **live preview** are done; the ffmpeg
+**export** (burning it all to an MP4) is the next step and not built yet. See
+[`ROADMAP.md`](ROADMAP.md) for status and [`CLAUDE.md`](CLAUDE.md) for the
+architecture, data model and gotchas.
 
-It adds **whisper.cpp** (word-level timestamps, needed for the karaoke
-highlight) alongside Voxtral, and a **React + Vite** frontend.
+Transcription uses **whisper.cpp** (word-level timestamps, for the karaoke
+highlight); translation reuses the **Voxtral llama-server**. The UI is a
+**React + TypeScript + Vite** app.
 
 ```bash
 # Build whisper.cpp with HIP + download the model (one time)
