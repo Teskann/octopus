@@ -72,11 +72,14 @@ RENDER_BROWSER_EXECUTABLE = os.getenv("RENDER_BROWSER_EXECUTABLE", "")
 # across RENDER_PARALLELISM browsers internally, so keep this low.
 EXPORT_CONCURRENCY = int(os.getenv("EXPORT_CONCURRENCY", "1"))
 # Browsers used in parallel to capture ONE clip's frames (contiguous chunks).
-# The big speed lever — set to ~cores/2. Each browser is ~300-500 MB of RAM.
-RENDER_PARALLELISM = int(os.getenv("RENDER_PARALLELISM", "4"))
-# JPEG quality (1-100) for captured frames. 90 is visually lossless after the
-# final H.264 encode and much faster to capture than PNG.
-RENDER_JPEG_QUALITY = int(os.getenv("RENDER_JPEG_QUALITY", "90"))
+# The big speed lever. Each browser is ~300-500 MB of RAM and decodes the source,
+# so returns diminish (and can reverse) once you exceed cores / GPU decode / RAM —
+# on short clips the per-browser startup tax dominates. Measure vs 8.
+RENDER_PARALLELISM = int(os.getenv("RENDER_PARALLELISM", "8"))
+# JPEG quality (1-100) for captured frames. These frames are re-encoded to H.264
+# (CRF 18) anyway, so past ~95 you only get bigger files + slower capture with no
+# visible gain — 100 would work against the speed goal. 95 is the sweet spot.
+RENDER_JPEG_QUALITY = int(os.getenv("RENDER_JPEG_QUALITY", "95"))
 # Per-action timeout (ms) and how long to wait for the page to become ready.
 RENDER_PAGE_TIMEOUT_MS = int(os.getenv("RENDER_PAGE_TIMEOUT_MS", "60000"))
 RENDER_READY_TIMEOUT_MS = int(os.getenv("RENDER_READY_TIMEOUT_MS", "60000"))
