@@ -178,9 +178,11 @@ async def add_scene(project_id: str, file: UploadFile = File(...)) -> dict:
         w, h = info.width, info.height
     except media.MediaError:
         w = h = 0
+    colors = store.SCENE_COLORS
     scene = {
         "id": sid, "name": Path(file.filename or "Scène").stem, "filename": filename,
         "is_main": False, "width": w, "height": h, "mode": "fit",
+        "color": colors[len(project["scenes"]) % len(colors)],
         "crop": {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0},
     }
     project.setdefault("scenes", []).append(scene)

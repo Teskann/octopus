@@ -19,6 +19,13 @@ from . import config
 
 SCHEMA_VERSION = 1
 
+# Distinct colours assigned to scenes (main gets the first) so the active scene
+# is recognisable in the timeline and transcript.
+SCENE_COLORS = [
+    "#6366f1", "#ef4444", "#22c55e", "#f59e0b",
+    "#06b6d4", "#ec4899", "#8b5cf6", "#84cc16",
+]
+
 _CACHE: dict[str, dict] = {}
 _LOCK = threading.Lock()
 
@@ -117,6 +124,7 @@ def new_project(name: str, source_filename: str) -> dict:
         "scenes": [{
             "id": "main", "name": "Principale", "filename": source_filename,
             "is_main": True, "width": 0, "height": 0, "mode": "crop",
+            "color": SCENE_COLORS[0],
             "crop": {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0},
         }],
         "overlays": [],
@@ -155,9 +163,10 @@ def get(project_id: str) -> dict | None:
             "width": project.get("width", 0), "height": project.get("height", 0),
             "mode": "crop", "crop": {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0},
         }]
-    for sc in project["scenes"]:
+    for i, sc in enumerate(project["scenes"]):
         sc.setdefault("mode", "crop" if sc.get("is_main") else "fit")
         sc.setdefault("crop", {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0})
+        sc.setdefault("color", SCENE_COLORS[i % len(SCENE_COLORS)])
     project.setdefault("scene_cuts", [])
     project.setdefault("translations", {})
     project.setdefault("translate_status", "idle")

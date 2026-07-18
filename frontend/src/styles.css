@@ -465,6 +465,17 @@ body {
 
 .stage-controls { display: flex; align-items: center; gap: 0.8rem; }
 .stage-controls .small { font-variant-numeric: tabular-nums; }
+
+/* timeline active-scene colour bands */
+.tl-scene { position: absolute; top: 0; bottom: 0; opacity: 0.32; pointer-events: none; }
+
+/* per-segment scene switcher (one colour dot per scene, active one filled) */
+.seg-scenes { display: flex; gap: 3px; align-items: center; margin-left: auto; flex: 0 0 auto; padding-left: 0.4rem; }
+.scene-dot {
+  width: 14px; height: 14px; border-radius: 4px; padding: 0;
+  border: 2px solid; background: transparent; cursor: pointer;
+}
+.scene-dot.on { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35); }
 .cut-list { display: flex; flex-direction: column; gap: 0.3rem; }
 .cut-item { display: flex; align-items: center; gap: 0.6rem; font-variant-numeric: tabular-nums; }
 .cut-item .link { min-width: 3rem; }

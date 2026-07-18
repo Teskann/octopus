@@ -81,6 +81,34 @@ export function Editor({ initial }: { initial: Project }) {
     };
   }, []);
 
+  // Keyboard: Space = play/pause (never scroll the page), ←/→ = seek 5s.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = document.activeElement as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el?.isContentEditable) return;
+      const v = videoRef.current;
+      if (!v) return;
+      if (e.code === "Space") {
+        e.preventDefault();
+        if (v.paused) {
+          setPreviewEnd(null);
+          v.play().catch(() => {});
+        } else {
+          v.pause();
+        }
+      } else if (e.code === "ArrowLeft") {
+        e.preventDefault();
+        v.currentTime = Math.max(0, v.currentTime - 5);
+      } else if (e.code === "ArrowRight") {
+        e.preventDefault();
+        v.currentTime = Math.min(v.duration || Infinity, v.currentTime + 5);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // Stop preview playback when the clip's end is reached.
   useEffect(() => {
     if (previewEnd != null && t >= previewEnd) {
@@ -143,8 +171,12 @@ export function Editor({ initial }: { initial: Project }) {
   function togglePlay() {
     const v = videoRef.current;
     if (!v) return;
-    if (v.paused) v.play().catch(() => {});
-    else v.pause();
+    if (v.paused) {
+      setPreviewEnd(null); // don't let a stale clip-preview stop re-pause us
+      v.play().catch(() => {});
+    } else {
+      v.pause();
+    }
   }
 
   const frameRegionStyle: CSSProperties = {
@@ -450,6 +482,8 @@ export function Editor({ initial }: { initial: Project }) {
           duration={project.duration}
           t={t}
           clips={clips}
+          scenes={project.scenes}
+          cuts={sceneCuts}
           selectedClipId={selectedClipId}
           onSeek={seek}
           onCreateClip={createClip}
@@ -492,6 +526,7 @@ export function Editor({ initial }: { initial: Project }) {
             onStartClip={startClip}
             onEndClip={endClip}
             scenes={project.scenes}
+            cuts={sceneCuts}
             onSceneCut={addSceneCut}
           />
         )}
@@ -527,6 +562,7 @@ export function Editor({ initial }: { initial: Project }) {
                 onStartClip={startClip}
                 onEndClip={endClip}
                 scenes={project.scenes}
+                cuts={sceneCuts}
                 onSceneCut={addSceneCut}
               />
             )}

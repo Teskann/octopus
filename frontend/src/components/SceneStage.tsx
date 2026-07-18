@@ -33,19 +33,32 @@ export function SceneStage({
 
   const vids = () => [bgRef.current, fgRef.current].filter(Boolean) as HTMLVideoElement[];
 
-  // Only the active scene follows the playhead + play state.
+  // Only the active scene follows the playhead + play state. The video is muted,
+  // so instead of seeking (which flickers) we nudge its playbackRate to catch up
+  // to the audio — keeping image and sound tightly in sync. Hard-seek only on a
+  // large drift (e.g. after a jump).
   useEffect(() => {
     if (!active) {
-      vids().forEach((v) => v.pause());
+      vids().forEach((v) => { v.pause(); v.playbackRate = 1; });
       return;
     }
     for (const v of vids()) {
-      const drift = Math.abs(v.currentTime - t);
+      const drift = v.currentTime - t; // + = image ahead, - = image behind
       if (playing) {
-        if (drift > 0.5) { try { v.currentTime = t; } catch { /* ignore */ } }
+        if (Math.abs(drift) > 0.5) {
+          try { v.currentTime = t; } catch { /* ignore */ }
+          v.playbackRate = 1;
+        } else if (drift > 0.05) {
+          v.playbackRate = 0.94; // image ahead → slow down
+        } else if (drift < -0.05) {
+          v.playbackRate = 1.06; // image behind → speed up to catch the sound
+        } else {
+          v.playbackRate = 1;
+        }
         if (v.paused) v.play().catch(() => {});
       } else {
-        if (drift > 0.05) { try { v.currentTime = t; } catch { /* ignore */ } }
+        v.playbackRate = 1;
+        if (Math.abs(drift) > 0.05) { try { v.currentTime = t; } catch { /* ignore */ } }
         v.pause();
       }
     }

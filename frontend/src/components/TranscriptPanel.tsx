@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { isWordActive } from "../captions";
-import type { Scene, Segment } from "../types";
+import { activeSceneId } from "../scenes";
+import type { Scene, SceneCut, Segment } from "../types";
 
 export function TranscriptPanel({
   projectId,
@@ -13,6 +14,7 @@ export function TranscriptPanel({
   onStartClip,
   onEndClip,
   scenes,
+  cuts,
   onSceneCut,
 }: {
   projectId: string;
@@ -24,6 +26,7 @@ export function TranscriptPanel({
   onStartClip: (seg: Segment) => void;
   onEndClip: (seg: Segment) => void;
   scenes: Scene[];
+  cuts: SceneCut[];
   onSceneCut: (seg: Segment, sceneId: string) => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -150,6 +153,22 @@ export function TranscriptPanel({
                     : s.text}
                   {s.translation && <span className="seg-trans"> — {s.translation}</span>}
                 </span>
+              )}
+              {!editing && scenes.length > 1 && (
+                <div className="seg-scenes" title="Scène affichée à partir d'ici">
+                  {scenes.map((sc) => {
+                    const on = activeSceneId(cuts, s.start) === sc.id;
+                    return (
+                      <button
+                        key={sc.id}
+                        className={`scene-dot ${on ? "on" : ""}`}
+                        style={{ backgroundColor: on ? sc.color : "transparent", borderColor: sc.color }}
+                        title={sc.name}
+                        onClick={(e) => { e.stopPropagation(); onSceneCut(s, sc.id); }}
+                      />
+                    );
+                  })}
+                </div>
               )}
             </div>
           );

@@ -90,6 +90,7 @@ export interface Scene {
   width: number;
   height: number;
   mode: FitMode;
+  color: string;
   crop: { x: number; y: number; w: number; h: number };
 }
 

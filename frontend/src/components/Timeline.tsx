@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent } from "react";
-import type { Clip } from "../types";
+import type { Clip, Scene, SceneCut } from "../types";
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 
@@ -16,6 +16,8 @@ export function Timeline({
   duration,
   t,
   clips,
+  scenes,
+  cuts,
   selectedClipId,
   onSeek,
   onCreateClip,
@@ -24,6 +26,8 @@ export function Timeline({
   duration: number;
   t: number;
   clips: Clip[];
+  scenes: Scene[];
+  cuts: SceneCut[];
   selectedClipId: string | null;
   onSeek: (to: number) => void;
   onCreateClip: (start: number, end: number) => void;
@@ -38,6 +42,21 @@ export function Timeline({
     const rect = trackRef.current!.getBoundingClientRect();
     return clamp(((clientX - rect.left) / rect.width) * duration, 0, duration);
   };
+
+  // Colour the track by the active scene across time (from the scene cuts).
+  const sceneColor = (id: string) => scenes.find((s) => s.id === id)?.color ?? "#334155";
+  const bands: { start: number; end: number; color: string }[] = [];
+  if (duration && scenes.length > 1) {
+    const sorted = [...cuts].sort((a, b) => a.time - b.time);
+    let prev = 0;
+    let prevScene = "main";
+    for (const c of sorted) {
+      if (c.time > prev) bands.push({ start: prev, end: c.time, color: sceneColor(prevScene) });
+      prevScene = c.scene_id;
+      prev = c.time;
+    }
+    bands.push({ start: prev, end: duration, color: sceneColor(prevScene) });
+  }
 
   function onTrackDown(e: ReactPointerEvent) {
     if (e.button !== 0) return; // left button only; right opens the context menu
@@ -81,6 +100,13 @@ export function Timeline({
   return (
     <div className="timeline">
       <div ref={trackRef} className="tl-track" onPointerDown={onTrackDown} onContextMenu={onContextMenu}>
+        {bands.map((b, i) => (
+          <div
+            key={i}
+            className="tl-scene"
+            style={{ left: `${pct(b.start)}%`, width: `${pct(b.end - b.start)}%`, background: b.color }}
+          />
+        ))}
         {clips.map((c) => (
           <div
             key={c.id}
