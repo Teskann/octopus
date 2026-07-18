@@ -133,6 +133,9 @@ export function Editor({ initial }: { initial: Project }) {
       ? { aspect: frame.aspect, mode: "crop", blur_bg: false, ...effCrop(selectedScene) }
       : null;
 
+  const stageSceneId = stage ? stage.scene.id : null;
+  const mainScene = project.scenes.find((s) => s.is_main) || null;
+
   function updateSceneCrop(id: string, crop: { x: number; y: number; w: number; h: number }) {
     updateScenes(project.scenes.map((s) => (s.id === id ? { ...s, crop } : s)));
   }
@@ -370,15 +373,30 @@ export function Editor({ initial }: { initial: Project }) {
             />
           ) : null}
           <div className="frame-region" style={frameRegionStyle}>
-          {stage && (
+          {/* Every secondary scene stays mounted; only the active one shows and
+              plays. Crossfade handles the transition — no remount, no reload. */}
+          {project.scenes.filter((s) => !s.is_main).map((sc) => (
             <SceneStage
-              key={stage.scene.id + stage.mode}
+              key={sc.id}
               projectId={project.id}
-              scene={stage.scene}
-              mode={stage.mode}
-              crop={stage.crop}
+              scene={sc}
+              mode={sc.mode}
+              crop={effCrop(sc)}
               t={t}
               playing={playing}
+              active={stageSceneId === sc.id}
+            />
+          ))}
+          {frame.mode === "fit" && mainScene && (
+            <SceneStage
+              key="__mainfit"
+              projectId={project.id}
+              scene={mainScene}
+              mode="fit"
+              crop={{ x: frame.x, y: frame.y, w: frame.w, h: frame.h }}
+              t={t}
+              playing={playing}
+              active={stageSceneId === "main"}
             />
           )}
           {cue && !editingSecondaryCrop && (

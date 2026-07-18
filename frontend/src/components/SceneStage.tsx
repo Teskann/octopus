@@ -3,18 +3,19 @@ import type { CSSProperties } from "react";
 import { api } from "../api";
 import type { FitMode, Scene } from "../types";
 
-/** Renders a scene into the output window.
- *  - "crop": the scene's crop window fills the frame (cover, pan/zoom via crop).
- *  - "fit": the whole scene is contained with a blurred cover copy behind, so a
- *    different-aspect scene shows the blur (never what's underneath) around it.
- *  Muted, synced to the main video's time + play state, and remounted per
- *  scene/mode so the zoom-punch animation replays on each switch. */
+/** A scene's player. Kept mounted for the whole session (never remounted on a
+ *  switch) — only the `active` one is shown and played, the rest stay loaded and
+ *  paused. This is what makes switching stable: no reload, no black frame, no
+ *  race between the fit layers. Crossfade + slight scale gives the punch.
+ *  - "crop": one video sized to map its crop window (cover, no black).
+ *  - "fit": a blurred cover copy behind + the whole scene contained in front. */
 export function SceneStage({
   projectId,
   scene,
   mode,
   crop,
   t,
+  active,
   playing,
 }: {
   projectId: string;
@@ -22,6 +23,7 @@ export function SceneStage({
   mode: FitMode;
   crop: { x: number; y: number; w: number; h: number };
   t: number;
+  active: boolean;
   playing: boolean;
 }) {
   const bgRef = useRef<HTMLVideoElement>(null);
@@ -29,12 +31,17 @@ export function SceneStage({
   const tRef = useRef(t);
   tRef.current = t;
 
+  const vids = () => [bgRef.current, fgRef.current].filter(Boolean) as HTMLVideoElement[];
+
+  // Only the active scene follows the playhead + play state.
   useEffect(() => {
-    const vids = [bgRef.current, fgRef.current].filter(Boolean) as HTMLVideoElement[];
-    for (const v of vids) {
+    if (!active) {
+      vids().forEach((v) => v.pause());
+      return;
+    }
+    for (const v of vids()) {
       const drift = Math.abs(v.currentTime - t);
       if (playing) {
-        // Let it play; only correct a large drift (seeking mid-play flickers).
         if (drift > 0.5) { try { v.currentTime = t; } catch { /* ignore */ } }
         if (v.paused) v.play().catch(() => {});
       } else {
@@ -42,25 +49,20 @@ export function SceneStage({
         v.pause();
       }
     }
-  }, [t, playing]);
+  }, [active, t, playing]);
 
-  // Snap to the current time whenever a source (re)loads, so it never sticks on
-  // frame 0 (the bug where the overlay showed black after a switch while paused).
+  // Snap to the current time whenever a source (re)loads.
   useEffect(() => {
-    const vids = [bgRef.current, fgRef.current].filter(Boolean) as HTMLVideoElement[];
+    const list = vids();
     const onLoad = (e: Event) => {
       const v = e.target as HTMLVideoElement;
       try { v.currentTime = tRef.current; } catch { /* ignore */ }
-      if (playing) v.play().catch(() => {});
     };
-    vids.forEach((v) => v.addEventListener("loadeddata", onLoad));
-    return () => vids.forEach((v) => v.removeEventListener("loadeddata", onLoad));
-  }, [playing]);
+    list.forEach((v) => v.addEventListener("loadeddata", onLoad));
+    return () => list.forEach((v) => v.removeEventListener("loadeddata", onLoad));
+  }, []);
 
   const src = api.sceneVideoUrl(projectId, scene.id);
-
-  // crop window -> position the video so the crop region fills the frame (no
-  // distortion because crop aspect is kept equal to the output aspect).
   const cropStyle: CSSProperties = {
     position: "absolute",
     width: `${100 / crop.w}%`,
@@ -73,7 +75,7 @@ export function SceneStage({
   };
 
   return (
-    <div className="scene-overlay">
+    <div className={`scene-overlay ${active ? "active" : ""}`}>
       {mode === "fit" ? (
         <>
           <video ref={bgRef} className="scene-bg" src={src} muted playsInline preload="auto" />

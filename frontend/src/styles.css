@@ -129,6 +129,7 @@ body {
   justify-content: center;
   padding: 0 6%;
   pointer-events: none;
+  z-index: 5; /* above the scene overlays (z-index 2) — subtitles stay on top */
 }
 .caption.pos-bottom { bottom: 12%; }
 .caption.pos-middle { top: 50%; transform: translateY(-50%); }
@@ -428,17 +429,18 @@ body {
 .seg.clip-start { box-shadow: inset 3px 0 0 0 var(--accent-2); }
 
 /* ---- Multi-scene B-roll ------------------------------------------------ */
-.scene-overlay { position: absolute; inset: 0; overflow: hidden; background: #000; animation: zoomPunch 0.16s ease-out; }
+.scene-overlay {
+  position: absolute; inset: 0; overflow: hidden; background: #000;
+  opacity: 0; transform: scale(1.08); pointer-events: none;
+  transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+}
+.scene-overlay.active { opacity: 1; transform: scale(1); z-index: 2; }
 /* max-width/height:none is essential: a crop video is sized past 100% to map its
    crop window, and the .video-frame video rule would otherwise clamp it. */
 .scene-overlay video { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; }
 .scene-bg { object-fit: cover; filter: blur(28px) brightness(0.7); transform: scale(1.12); }
 .scene-fg { object-fit: contain; }
 /* .scene-crop is sized/positioned inline to map its crop window to the frame */
-@keyframes zoomPunch {
-  from { transform: scale(1.12); opacity: 0.5; }
-  to   { transform: scale(1); opacity: 1; }
-}
 
 .menu-sep { height: 1px; background: var(--border); margin: 0.3rem 0.25rem; }
 
