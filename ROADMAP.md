@@ -16,8 +16,11 @@ Everything runs on this machine (RX 6900 XT, ROCm). No cloud calls.
   underneath (e.g. FR large / EN small).
 - **Translation:** local, reusing the existing `llama-server` (Voxtral/Mistral)
   for text translation.
-- **Export:** server-side `ffmpeg` — ASS subtitles + overlays + blur-fill +
-  concat. High quality and deterministic.
+- **Export:** *"one renderer"* — a clip is rendered by loading the frontend's own
+  preview route in **headless Chrome** and screenshotting it frame by frame
+  (`app/render.py` + `RenderPage.tsx`), then muxing audio with `ffmpeg`. The
+  export matches the preview by construction (same fonts/blur/karaoke/overlays),
+  instead of re-implementing the look in an ffmpeg filtergraph.
 - **Frontend:** React + TypeScript + Vite. Dev via Vite proxy → FastAPI `:8000`;
   prod serves the built bundle from FastAPI.
 
@@ -67,11 +70,14 @@ data/projects/<id>/
 - A clip has its own aspect ratio, blurred-video background fill, and
   intro/outro — edited independently from the source.
 
-### Epic E — Export  *(Phase 5)*
-- I export a clip (or the whole video) to MP4 with everything burned in.
+### Epic E — Export  *(Phase 5)* — **done**
+- I export a clip to MP4 with everything burned in (captions, overlays, reframe,
+  scene switches with crossfade) — pixel-matching the preview.
 - Aspect ratio is applied by cropping/scaling; empty space is filled with a
   blurred, scaled copy of the video.
-- I get a progress bar and a download.
+- I get a progress bar and a download (per clip, or "export all clips").
+- Rendered by headless Chrome capturing the preview route in parallel across
+  `RENDER_PARALLELISM` browsers; `ffmpeg` assembles the JPEG frames + audio.
 
 ### Epic F — Polish  *(Phase 6)*
 - Style presets, project list (rename/delete), load models on demand to fit
@@ -83,14 +89,14 @@ data/projects/<id>/
 - [x] **Phase 2** — Subtitle rendering, style & bilingual translation
 - [x] **Phase 3** — Transcript correction + image/text overlays
 - [x] **Phase 4** — Timeline & clip selection
-- [ ] **Phase 5** — Export/render pipeline (ffmpeg) ← **next, not started**
-- [ ] Phase 6 — Polish
+- [x] **Phase 5** — Export/render pipeline (headless-browser "one renderer")
+- [ ] Phase 6 — Polish ← **next**
 
 ## Built beyond the original phases (refinements)
 
-The editor + **live preview** are done; only the ffmpeg **export** is missing.
-On top of Phases 1–4 the following was added (all preview-only until Phase 5
-renders them):
+The editor + **live preview** and the **export** (Phase 5) are done. On top of
+Phases 1–4 the following was added — all of it is both previewed live *and*
+rendered on export (the export reuses the preview's own React/CSS):
 
 - **Reframing**: project-wide aspect + per-scene crop window (drag/zoom
   `ReframeBox`) and per-scene **crop vs fit** (fit = contain + blurred fill). When
@@ -105,6 +111,14 @@ renders them):
   translation on/off + position, robust translation prompt (no refusals /
   omissions / Markdown).
 - **UX**: play/pause + time bar, Space play/pause (no page scroll), ←/→ seek ±5s.
+- **Export (Phase 5)**: headless-Chrome "one renderer" — a clip's frames are
+  captured from the preview route (`?render=1`) in parallel across
+  `RENDER_PARALLELISM` browsers and muxed with `ffmpeg`. Scene switches crossfade
+  (zoom-punch, shared `scenes.ts sceneLayersAt`, redundant/self cuts dropped, fade
+  led slightly before the cut); the editor preview uses the same timing so what
+  you see matches what you download. Per-clip and "export all" with polled
+  progress + download. Needs real Chrome (H.264) and the frontend reachable at
+  `RENDER_BASE_URL`.
 
 Data model additions to remember: `frame` (aspect+mode+crop+blur_bg), `scenes`
 (with mode/crop/color), `scene_cuts`. All migrated in `store.get()`.
