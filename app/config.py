@@ -55,6 +55,32 @@ DRY_MULTIPLIER = float(os.getenv("DRY_MULTIPLIER", "0.6"))  # 0 disables DRY sam
 # transcripts while bounding garbage to the chunk's worth of output.
 MAX_OUTPUT_TOKENS = int(os.getenv("MAX_OUTPUT_TOKENS", str(CHUNK_SECONDS * 8)))
 
+# --- clip export / render (app/render.py, app/exports.py) -------------------
+# Export renders the frontend's own preview route in a headless browser and
+# screenshots it frame by frame (see app/render.py). The frontend must be
+# reachable here — the Vite dev server in dev, or the built app served by FastAPI.
+# Use `localhost` (not the 127.0.0.1 literal): the Vite dev server often binds
+# IPv6-only (`[::1]:5173`) under Node 17+, and `localhost` resolves to it.
+RENDER_BASE_URL = os.getenv("RENDER_BASE_URL", "http://localhost:5173")
+# Must be a browser with H.264/AAC codecs (the source is H.264) — Playwright's
+# bundled Chromium can't decode it, so use real Chrome: `playwright install chrome`.
+RENDER_BROWSER_CHANNEL = os.getenv("RENDER_BROWSER_CHANNEL", "chrome")
+# Optional explicit path to a Chrome/Chromium binary, tried before the channel
+# (useful if `channel="chrome"` can't find the install, e.g. odd paths).
+RENDER_BROWSER_EXECUTABLE = os.getenv("RENDER_BROWSER_EXECUTABLE", "")
+# How many clips to render at once ("export all"). Each clip is already rendered
+# across RENDER_PARALLELISM browsers internally, so keep this low.
+EXPORT_CONCURRENCY = int(os.getenv("EXPORT_CONCURRENCY", "1"))
+# Browsers used in parallel to capture ONE clip's frames (contiguous chunks).
+# The big speed lever — set to ~cores/2. Each browser is ~300-500 MB of RAM.
+RENDER_PARALLELISM = int(os.getenv("RENDER_PARALLELISM", "4"))
+# JPEG quality (1-100) for captured frames. 90 is visually lossless after the
+# final H.264 encode and much faster to capture than PNG.
+RENDER_JPEG_QUALITY = int(os.getenv("RENDER_JPEG_QUALITY", "90"))
+# Per-action timeout (ms) and how long to wait for the page to become ready.
+RENDER_PAGE_TIMEOUT_MS = int(os.getenv("RENDER_PAGE_TIMEOUT_MS", "60000"))
+RENDER_READY_TIMEOUT_MS = int(os.getenv("RENDER_READY_TIMEOUT_MS", "60000"))
+
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 PROJECTS_DIR.mkdir(parents=True, exist_ok=True)

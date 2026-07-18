@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Renderer « façon Remotion » — Option A vs B</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d222b; --ink:#e7ecf3; --muted:#9aa7b8;
+    --a:#6ea8ff; --b:#c495ff; --good:#57d38c; --bad:#ff6b6b; --warn:#ffcf5c; --line:#2a313d;
+    --kw:#c586c0; --str:#ce9178; --fn:#dcdcaa; --num:#b5cea8; --cm:#6a9955; --var:#9cdcfe;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:19px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:1120px;margin:0 auto;padding:48px 28px 120px;}
+  h1{font-size:2.5rem;line-height:1.15;margin:0 0 8px;letter-spacing:-.02em}
+  h2{font-size:1.7rem;margin:56px 0 14px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+  h3{font-size:1.28rem;margin:30px 0 10px;color:#fff}
+  p{margin:14px 0}
+  .lede{font-size:1.2rem;color:var(--muted);max-width:82ch}
+  code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.9em;
+    background:#242a34;padding:2px 6px;border-radius:5px}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:22px 0}
+  .opt{border-radius:16px;border:1px solid var(--line);background:var(--panel);overflow:hidden}
+  .opt .cap{padding:18px 22px;font-weight:800;font-size:1.15rem;display:flex;align-items:center;gap:10px}
+  .opt.a .cap{background:linear-gradient(90deg,#1a2740,#171a21);color:#a9c9ff;border-bottom:1px solid #274063}
+  .opt.b .cap{background:linear-gradient(90deg,#2a1f40,#171a21);color:#d3b6ff;border-bottom:1px solid #3d2c63}
+  .opt .body{padding:6px 22px 20px}
+  .chip{font-size:.72rem;font-weight:700;padding:2px 9px;border-radius:999px;text-transform:uppercase;letter-spacing:.04em}
+  .chip.a{background:#16233b;color:#8fb6ff;border:1px solid #274063}
+  .chip.b{background:#241a3b;color:#c9adff;border:1px solid #3d2c63}
+  .pro,.con{display:flex;gap:10px;margin:9px 0;font-size:.98rem}
+  .pro:before{content:"▲";color:var(--good);font-size:.8rem;line-height:1.7}
+  .con:before{content:"▼";color:var(--bad);font-size:.8rem;line-height:1.7}
+  .neu{display:flex;gap:10px;margin:9px 0;font-size:.98rem}
+  .neu:before{content:"◆";color:var(--warn);font-size:.8rem;line-height:1.7}
+  table{border-collapse:collapse;width:100%;margin:20px 0;font-size:.97rem}
+  th,td{border:1px solid var(--line);padding:12px 14px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:#fff;font-size:.85rem;text-transform:uppercase;letter-spacing:.03em}
+  th.a{color:#a9c9ff} th.b{color:#d3b6ff}
+  td.dim{color:var(--muted);font-weight:600;white-space:nowrap}
+  .win{color:var(--good);font-weight:700}
+  .tie{color:var(--warn);font-weight:700}
+  pre{background:#0c0e12;border:1px solid var(--line);border-radius:12px;padding:15px 17px;overflow:auto;
+    font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:14px;line-height:1.55;margin:12px 0}
+  .kw{color:var(--kw)} .str{color:var(--str)} .fn{color:var(--fn)} .num{color:var(--num)}
+  .cm{color:var(--cm)} .var{color:var(--var)} .em{color:#fff;font-weight:600}
+  .callout{border-left:4px solid var(--a);background:var(--panel2);padding:14px 18px;border-radius:0 10px 10px 0;margin:16px 0}
+  .callout.bad{border-color:var(--bad)} .callout.good{border-color:var(--good)} .callout.warn{border-color:var(--warn)}
+  .rec{background:linear-gradient(180deg,#122019,#0f1115);border:1px solid #24522f;border-radius:16px;padding:24px 28px;margin:24px 0}
+  .rec h3{margin-top:0;color:#8bf0af}
+  ul{margin:12px 0;padding-left:22px} li{margin:7px 0}
+  .muted{color:var(--muted)} .small{font-size:.9rem}
+  .verdict{font-size:1.12rem}
+  a{color:var(--a)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Renderer « façon Remotion »</h1>
+<p class="lede">Deux façons de construire l'export. <span class="em">Les deux capturent Chrome en train de
+rendre ton CSS</span> — donc les sous-titres, le flou, les polices TikTok, le contour de texte et la boîte
+arrondie sont <span class="em">identiques au preview dans les deux cas</span>. La vraie différence : qui gère
+les parties difficiles (frames vidéo exactes, audio, la boucle de rendu) — toi, ou le framework.</p>
+
+<div class="cols">
+  <div class="opt a">
+    <div class="cap">🅐 &nbsp;Utiliser Remotion <span class="chip a">framework</span></div>
+    <div class="body">
+      <p class="small muted">Une <em>composition</em> Remotion re-rend le clip de façon déterministe à partir de
+      <code>project.json</code>, en partageant les modules purs (<code>captions.ts</code>, <code>frame.ts</code>,
+      <code>scenes.ts</code>, styles). Le backend appelle <code>@remotion/renderer</code>.</p>
+      <div class="pro"><div><span class="em">Frames vidéo exactes</span> — <code>&lt;OffthreadVideo&gt;</code> extrait la bonne image via ffmpeg, pas de seek d'un <code>&lt;video&gt;</code> vivant. C'est <em>le</em> problème dur, résolu.</div></div>
+      <div class="pro"><div><span class="em">Audio automatique</span> — <code>&lt;Video&gt;</code>/<code>&lt;Audio&gt;</code> sont collectés, mixés et muxés pour toi (volume, trim, sync).</div></div>
+      <div class="pro"><div><span class="em">Rapide</span> — rendu des frames en parallèle (plusieurs onglets/process Chrome), compositor Rust.</div></div>
+      <div class="pro"><div>Progress, reprise, gestion d'erreurs, <code>delayRender()</code> pour attendre les assets — déjà là.</div></div>
+      <div class="pro"><div>Battle-tested : c'est exactement l'outil que tu as pointé.</div></div>
+      <div class="con"><div><span class="em">Composition parallèle à maintenir</span> — le layout de compositing est ré-exprimé en Remotion (<code>useCurrentFrame</code>, <code>&lt;Sequence&gt;</code>, <code>interpolate</code>). On partage les sous-composants, mais ce n'est pas <em>littéralement</em> le preview.</div></div>
+      <div class="con"><div><span class="em">Toolchain lourde</span> — bundler Remotion propre (séparé de ton Vite), un process node que le backend Python lance.</div></div>
+      <div class="con"><div><span class="em">Licence non permissive</span> — gratuit en perso/petite équipe, mais Company License payante au-delà. À vérifier si ça devient un produit.</div></div>
+      <div class="con"><div>Encodage surtout CPU (x264). Peu de contrôle pour brancher VAAPI GPU sur ta gfx1030.</div></div>
+    </div>
+  </div>
+
+  <div class="opt b">
+    <div class="cap">🅑 &nbsp;Capture headless maison <span class="chip b">Playwright + ffmpeg</span></div>
+    <div class="body">
+      <p class="small muted">Un petit pipeline backend charge <span class="em">tes composants preview existants</span>
+      (mode déterministe piloté par un prop <code>t</code>) dans Chromium headless, avance frame par frame,
+      screenshote, puis muxe l'audio source du clip via ffmpeg.</p>
+      <div class="pro"><div><span class="em">Parité maximale</span> — on charge le <em>même bundle</em>, les <em>mêmes composants</em>, le <em>même CSS</em>. Zéro « deuxième rendu » à faire dériver.</div></div>
+      <div class="pro"><div><span class="em">Dépendances minimales & permissives</span> — Playwright (Apache-2.0), ton ffmpeg. Rien de propriétaire.</div></div>
+      <div class="pro"><div><span class="em">Contrôle total de ffmpeg</span> — VAAPI GPU sur gfx1030, CRF, faststart : tu choisis tout.</div></div>
+      <div class="pro"><div>Colle à l'esprit du repo : local, simple, peu de concepts nouveaux.</div></div>
+      <div class="con"><div><span class="em">Tu possèdes le problème dur</span> — la précision des frames vidéo. Seeker un <code>&lt;video&gt;</code> par frame dans Chrome est <em>lent</em> et pas toujours frame-exact (surtout avec plusieurs scènes simultanées).</div></div>
+      <div class="con"><div><span class="em">Boucle de rendu à écrire</span> — stepping, screenshot, pipe PNG→ffmpeg, extraction/trim audio, progress. ~300–500 lignes à nous.</div></div>
+      <div class="con"><div>Rendu séquentiel par défaut (1 onglet). Paralléliser = travail en plus.</div></div>
+      <div class="con"><div>Les composants preview sont mêlés à la logique de lecture live (<code>SceneStage</code> nudge le <code>playbackRate</code>) — il faut ajouter un « mode rendu » déterministe proprement.</div></div>
+    </div>
+  </div>
+</div>
+
+<h2>Comparatif tête à tête</h2>
+<table>
+<thead><tr><th style="width:22%">Critère</th><th class="a">🅐 Remotion</th><th class="b">🅑 Capture maison</th></tr></thead>
+<tbody>
+<tr><td class="dim">Fidélité CSS<br><span class="small muted">(polices, flou, contour, boîte)</span></td>
+  <td>Parfaite (Chrome rend le CSS) <span class="tie">= égalité</span></td>
+  <td>Parfaite (Chrome rend le CSS) <span class="tie">= égalité</span></td></tr>
+<tr><td class="dim">Réutilisation du preview</td>
+  <td>Partielle : sous-composants partagés, layout ré-écrit en composition</td>
+  <td><span class="win">Totale</span> : les mêmes composants/bundle chargés tels quels</td></tr>
+<tr><td class="dim">Frames vidéo exactes</td>
+  <td><span class="win">Résolu</span> — <code>OffthreadVideo</code> extrait via ffmpeg</td>
+  <td>À notre charge — seek <code>&lt;video&gt;</code> par frame, plus lent / plus risqué</td></tr>
+<tr><td class="dim">Audio (mix, trim, sync)</td>
+  <td><span class="win">Automatique</span></td>
+  <td>Manuel (ffmpeg trim de la source — simple ici : 1 piste)</td></tr>
+<tr><td class="dim">Vitesse de rendu</td>
+  <td><span class="win">Rapide</span> — frames en parallèle</td>
+  <td>Séquentiel par défaut ; parallélisable avec effort</td></tr>
+<tr><td class="dim">Dépendances</td>
+  <td>Remotion + son bundler + chrome-shell + process node</td>
+  <td><span class="win">Playwright + ffmpeg</span> (léger)</td></tr>
+<tr><td class="dim">Licence</td>
+  <td>Source-available ; payante pour grandes entités</td>
+  <td><span class="win">Apache-2.0 / ffmpeg</span> — permissif</td></tr>
+<tr><td class="dim">Encodage GPU (VAAPI gfx1030)</td>
+  <td>Difficile (surtout x264 CPU)</td>
+  <td><span class="win">Possible</span> — tu contrôles la ligne ffmpeg</td></tr>
+<tr><td class="dim">100 % local / offline</td>
+  <td>Oui (chrome-shell téléchargé une fois)</td>
+  <td>Oui (Chromium Playwright téléchargé une fois)</td></tr>
+<tr><td class="dim">Risque de dérive preview↔export</td>
+  <td>Faible-moyen (2ᵉ rendu, modules partagés)</td>
+  <td><span class="win">Quasi nul</span> (un seul rendu)</td></tr>
+<tr><td class="dim">Effort de mise en place</td>
+  <td>Moyen-élevé (restructurer en composition)</td>
+  <td>Moyen (réutiliser + écrire la boucle)</td></tr>
+<tr><td class="dim">Risque principal</td>
+  <td>Toolchain/licence, layout à re-mapper fidèlement</td>
+  <td>Précision & vitesse du seek vidéo par frame</td></tr>
+</tbody>
+</table>
+
+<h2>À quoi ressemble chaque boucle de rendu</h2>
+<div class="cols">
+  <div class="opt a"><div class="cap" style="font-size:1rem">🅐 Remotion — tu décris, il rend</div>
+  <div class="body">
+<pre><span class="cm">// remotion/Clip.tsx — composition déterministe</span>
+<span class="kw">export const</span> <span class="fn">Clip</span> = ({project, clip}) => {
+  <span class="kw">const</span> f = <span class="fn">useCurrentFrame</span>();      <span class="cm">// frame courante</span>
+  <span class="kw">const</span> t = clip.start + f / fps;
+  <span class="kw">return</span> (
+    &lt;<span class="var">AbsoluteFill</span>&gt;
+      &lt;<span class="var">OffthreadVideo</span> src={sceneSrc} <span class="cm">/* frame exacte */</span> /&gt;
+      &lt;<span class="var">Captions</span> cue={<span class="fn">cueAt</span>(t)} style={style} /&gt;
+      &lt;<span class="var">Overlays</span> t={t} /&gt;
+    &lt;/<span class="var">AbsoluteFill</span>&gt;
+  );
+};
+<span class="cm">// backend: renderMedia({composition, props, codec})</span>
+<span class="cm">// → frames // en parallèle + audio muxé, tout seul</span></pre>
+  </div></div>
+  <div class="opt b"><div class="cap" style="font-size:1rem">🅑 Maison — tu pilotes Chrome</div>
+  <div class="body">
+<pre><span class="cm"># app/render.py (nouveau) — pseudo</span>
+page = <span class="kw">await</span> browser.<span class="fn">new_page</span>()
+<span class="kw">await</span> page.<span class="fn">goto</span>(<span class="str">f"/render?project={id}&clip={cid}"</span>)
+<span class="kw">for</span> i <span class="kw">in</span> <span class="fn">range</span>(n_frames):
+    t = start + i / fps
+    <span class="kw">await</span> page.<span class="fn">evaluate</span>(<span class="str">f"window.seek({t})"</span>)  <span class="cm"># seek vidéos + attend</span>
+    png = <span class="kw">await</span> page.<span class="fn">screenshot</span>()
+    ffmpeg_stdin.<span class="fn">write</span>(png)              <span class="cm"># image2pipe</span>
+<span class="cm"># puis ffmpeg: frames + audio source (trim) → mp4</span>
+<span class="cm"># tu ajoutes -c:v h264_vaapi si tu veux le GPU</span></pre>
+  </div></div>
+</div>
+
+<h2>Spécifique à ton projet</h2>
+<div class="callout warn">
+<strong>Le point qui tranche vraiment :</strong> tes clips ont des <span class="em">changements de scène (plusieurs vidéos)</span>
++ reframe. Rendre ça frame-exact, c'est là que le seek d'un <code>&lt;video&gt;</code> par frame de l'option B est
+le plus fragile et le plus lent — et exactement ce que <code>OffthreadVideo</code> de l'option A résout sans effort.
+À l'inverse, ton envie de <span class="em">GPU AMD (VAAPI gfx1030)</span> et de rester <span class="em">léger/permissif/local</span>
+penche vers l'option B.</div>
+
+<div class="rec">
+  <h3>Ma lecture</h3>
+  <p class="verdict"><span class="em">Si le but est « ça marche, robuste, je ne veux pas déboguer la vidéo » →</span> Option A (Remotion).
+  Elle résout précisément les deux parties dures (frames vidéo exactes + audio) que tu devrais sinon écrire et fiabiliser toi-même,
+  et c'est l'outil que tu as déjà repéré.</p>
+  <p class="verdict"><span class="em">Si tu valorises le repo minimal, la réutilisation exacte du preview, la licence permissive et l'encode GPU →</span>
+  Option B (maison). Parité maximale par construction, mais tu prends le risque « seek vidéo par frame ».</p>
+  <p style="margin-bottom:0" class="muted">Mon léger penchant : <span class="em">Option A</span> pour ce cas précis, à cause du multi-scènes frame-exact —
+  sauf si la licence non-permissive ou l'obligation d'encoder sur GPU AMD sont des contraintes fortes pour toi, auquel cas B.
+  Dis-moi ce qui compte le plus (robustesse vidéo, légèreté/licence, ou GPU) et je pars dessus.</p>
+</div>
+
+<p class="small muted">Note pratique commune : je ne peux pas lancer <code>node</code>/<code>npm</code> ni Playwright dans le sandbox —
+dans les deux cas tu feras l'install et les runs toi-même ; j'écris le code avec soin et tu valides par un run.</p>
+
+</div>
+</body>
+</html>

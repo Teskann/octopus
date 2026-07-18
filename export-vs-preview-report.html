@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Export ≠ Preview — Diagnostic & fixes</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d222b; --ink:#e7ecf3; --muted:#9aa7b8;
+    --accent:#6ea8ff; --good:#57d38c; --bad:#ff6b6b; --warn:#ffcf5c; --line:#2a313d;
+    --kw:#c586c0; --str:#ce9178; --fn:#dcdcaa; --num:#b5cea8; --cm:#6a9955; --var:#9cdcfe;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:19px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  .wrap{max-width:1080px;margin:0 auto;padding:48px 28px 120px;}
+  h1{font-size:2.5rem;line-height:1.15;margin:0 0 8px;letter-spacing:-.02em}
+  h2{font-size:1.7rem;margin:56px 0 14px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+  h3{font-size:1.28rem;margin:34px 0 10px;color:#fff}
+  p{margin:14px 0}
+  .lede{font-size:1.22rem;color:var(--muted);max-width:80ch}
+  code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.92em;
+    background:#242a34;padding:2px 6px;border-radius:5px}
+  .tag{display:inline-block;font-size:.8rem;font-weight:700;padding:3px 10px;border-radius:999px;
+    text-transform:uppercase;letter-spacing:.04em;vertical-align:middle}
+  .t-root{background:#3a2230;color:#ff9db6;border:1px solid #5a2c40}
+  .t-bug{background:#3a1f1f;color:#ff8f8f;border:1px solid #5a2a2a}
+  .t-fix{background:#16301f;color:#7ee8a6;border:1px solid #24522f}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 26px;margin:18px 0}
+  .card.root{border-color:#5a2c40;background:linear-gradient(180deg,#1b1418,#171a21)}
+  pre{background:#0c0e12;border:1px solid var(--line);border-radius:12px;padding:16px 18px;overflow:auto;
+    font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:15px;line-height:1.55;margin:14px 0}
+  .kw{color:var(--kw)} .str{color:var(--str)} .fn{color:var(--fn)} .num{color:var(--num)}
+  .cm{color:var(--cm)} .var{color:var(--var)} .em{color:#fff;font-weight:600}
+  table{border-collapse:collapse;width:100%;margin:18px 0;font-size:.98rem}
+  th,td{border:1px solid var(--line);padding:11px 14px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);color:#fff;font-size:.88rem;text-transform:uppercase;letter-spacing:.03em}
+  td.sym{font-weight:700;white-space:nowrap}
+  .diff{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:16px 0}
+  .diff .col{border-radius:12px;overflow:hidden;border:1px solid var(--line)}
+  .diff .h{padding:8px 14px;font-weight:700;font-size:.9rem}
+  .diff .before .h{background:#2a1a1a;color:#ff9d9d}
+  .diff .after  .h{background:#16301f;color:#8bf0af}
+  .diff pre{margin:0;border:0;border-radius:0}
+  .row{display:flex;gap:14px;align-items:flex-start;margin:10px 0}
+  .row .n{flex:0 0 30px;height:30px;border-radius:50%;background:var(--panel2);color:var(--accent);
+    display:grid;place-items:center;font-weight:700;border:1px solid var(--line)}
+  ul{margin:12px 0;padding-left:22px} li{margin:7px 0}
+  .callout{border-left:4px solid var(--accent);background:var(--panel2);padding:14px 18px;border-radius:0 10px 10px 0;margin:16px 0}
+  .callout.bad{border-color:var(--bad)} .callout.good{border-color:var(--good)} .callout.warn{border-color:var(--warn)}
+  .pill{font-size:.8rem;color:var(--muted)}
+  .rec{background:linear-gradient(180deg,#122019,#0f1115);border:1px solid #24522f;border-radius:14px;padding:24px 28px;margin:22px 0}
+  .rec h3{margin-top:0;color:#8bf0af}
+  a{color:var(--accent)}
+  .muted{color:var(--muted)}
+  .verdict{font-size:1.1rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Pourquoi l'export ≠ le preview</h1>
+<p class="lede">Et pourquoi opus.pro/CapCut, eux, te rendent <em>exactement</em> ce que tu vois.
+Diagnostic du diff non commité (<code>app/render.py</code>, <code>app/subtitles.py</code>) + plan de correction.</p>
+
+<div class="card root">
+  <span class="tag t-root">Cause racine</span>
+  <h3 style="margin-top:14px">Tu as deux moteurs de rendu différents qui ne se parleront jamais.</h3>
+  <p>Le preview est dessiné par le <span class="em">navigateur</span> : DOM + CSS
+  (<code>&lt;div class="caption"&gt;</code>, <code>@font-face</code>, <code>filter:blur()</code>,
+  transitions CSS, <code>WebkitTextStroke</code>).</p>
+  <p>L'export est dessiné par <span class="em">ffmpeg + libass</span> : un filtergraph
+  (<code>crop</code>, <code>overlay</code>, <code>gblur</code>, <code>drawtext</code>, filtre <code>ass</code>).</p>
+  <p style="margin-bottom:0">Chaque détail visuel est donc <span class="em">réimplémenté deux fois</span>, dans deux
+  langages, avec deux modèles de rendu. <code>render.py</code> réécrit à la main
+  <code>frame.ts</code>, <code>scenes.ts</code> et <code>Editor.effCrop</code> en Python. À la moindre
+  divergence — une police qui tombe en fallback, un arrondi, un flou exprimé en pixels d'écran — les deux
+  images partent dans des directions différentes. <span class="em">Ce n'est pas un bug isolé : c'est
+  l'architecture.</span> C'est même écrit noir sur blanc dans ton <code>CLAUDE.md</code> :
+  « <em>two renderers (CSS DOM vs libass/ffmpeg) — never bit-identical</em> ».</p>
+</div>
+
+<div class="callout good">
+<strong>Comment opus.pro / CapCut / Remotion évitent ça :</strong> il n'y a qu'<em>un seul</em> moteur.
+Soit le preview <em>est</em> l'export (on capture image par image la même composition
+canvas/DOM en headless, façon <a href="https://www.remotion.dev">Remotion</a>), soit le preview
+est un flux vidéo rendu côté serveur par le moteur d'export. Le « preview » n'est jamais une
+<em>imitation</em> de l'export — c'est la même chose. Donc par construction : ce que tu vois = ce que tu télécharges.</p>
+</div>
+
+<h2>Chaque symptôme → sa cause précise dans le code</h2>
+<table>
+<thead><tr><th>Ce que tu vois</th><th>Cause exacte</th><th>Où</th></tr></thead>
+<tbody>
+<tr>
+  <td class="sym">Mauvaise police</td>
+  <td>Les polices TikTok (Anton, Bebas…) ne sont <span class="em">pas installées dans fontconfig</span>.
+  Preuve sur ta machine : <code>fc-match "Anton"</code> → <code>NotoSans-Regular.ttf</code>. Tes overlays
+  texte appellent <code>_resolve_font()</code> = <code>fc-match</code> → ils prennent <span class="em">Noto</span>.
+  Et le style ASS demande <code>Bold=1</code> alors que les .ttf sont mono-graisse → libass peut re-matcher
+  via fontconfig et retomber sur Noto malgré <code>fontsdir</code>.</td>
+  <td><code>render.py</code> L141, L257<br><code>subtitles.py</code> L153</td>
+</tr>
+<tr>
+  <td class="sym">Sous-titres qui « flashent »</td>
+  <td>Karaoké = <span class="em">un évènement ASS <code>Dialogue</code> par mot</span>. libass
+  re-rasterise tout le bloc à chaque mot ; aux frontières, la quantification au centième de seconde
+  (<code>_ass_time</code>) et le re-dessin d'un bloc à fond opaque produisent des clignotements 1-frame.
+  Le preview, lui, garde <span class="em">un seul nœud DOM permanent</span> et ne change que la couleur d'un
+  <code>&lt;span&gt;</code> → zéro flash.</td>
+  <td><code>subtitles.py</code> L205-211<br><code>Editor.tsx</code> L449</td>
+</tr>
+<tr>
+  <td class="sym">Transitions ratées</td>
+  <td>Le preview fait un <span class="em">zoom-punch + fondu</span> (transition CSS
+  <code>opacity</code>+<code>transform:scale</code>). L'export fait un fondu <span class="em">opacité seule</span>
+  (<code>fade:alpha</code> sur un <code>overlay=enable=between()</code>) : pas de zoom, courbe d'accélération
+  différente, gate on/off dur. Deux animations sans rapport.</td>
+  <td><code>render.py</code> L191-214<br><code>SceneStage</code>+CSS</td>
+</tr>
+<tr>
+  <td class="sym">Overlays texte moches</td>
+  <td>Preview = DOM stylé (coins arrondis, ombre, wrap auto). Export = <code>drawtext</code> :
+  pas de coin arrondi, pas de retour à la ligne auto, police via <code>fc-match</code> (donc Noto encore).</td>
+  <td><code>render.py</code> L244-268</td>
+</tr>
+<tr>
+  <td class="sym">Flou / cadrage légèrement différents</td>
+  <td>Le flou CSS est en <span class="em">pixels d'écran</span> (dépend de la taille du preview), pas
+  résolution-indépendant → l'estimation <code>BG_BLUR_FRAC</code> ne peut pas coïncider. Et toute la
+  géométrie est réimplémentée en Python (<code>default_frame_rect</code>, <code>eff_crop</code>,
+  <code>active_scene_id</code>) : dérive garantie dès qu'on touche un côté.</td>
+  <td><code>render.py</code> L36-92</td>
+</tr>
+</tbody>
+</table>
+
+<h2>Deux façons de corriger (à toi de choisir)</h2>
+
+<div class="card">
+  <span class="tag t-fix">Option A — la « bonne »</span>
+  <h3 style="margin-top:12px">Un seul moteur : le preview EST l'export</h3>
+  <p>C'est l'approche opus.pro / Remotion. On arrête de dessiner les sous-titres/overlays en ffmpeg.
+  On rend la <span class="em">même composition</span> (le même code React/canvas qui fait déjà le preview)
+  image par image, côté serveur, dans un <span class="em">Chromium headless</span> (Playwright/Puppeteer),
+  puis on assemble les frames + l'audio avec ffmpeg. libass et <code>drawtext</code> disparaissent.</p>
+  <ul>
+    <li><span class="em">Parité pixel réelle</span> — polices, karaoké, transitions, overlays, flou : identiques, car c'est le même rendu.</li>
+    <li>Fini les deux implémentations de géométrie à maintenir en parallèle.</li>
+    <li>Coût : ajouter un pipeline de capture headless (≈ ce que fait Remotion). Encodage plus lourd que le filtergraph pur.</li>
+  </ul>
+  <p class="pill">Recommandé si l'objectif est « je télécharge exactement le preview, en mieux ». C'est le seul moyen d'y arriver vraiment.</p>
+</div>
+
+<div class="card">
+  <span class="tag t-fix">Option B — la « rapide »</span>
+  <h3 style="margin-top:12px">Garder ffmpeg, mais tuer les divergences une par une</h3>
+  <p>On ne vise pas la parité pixel (impossible avec deux moteurs), mais on supprime les écarts <em>visibles</em>.
+  Gains rapides, dans l'ordre d'impact :</p>
+  <div class="row"><div class="n">1</div><div><span class="em">Polices</span> — installer les .ttf dans fontconfig (ou embarquer la police), et arrêter <code>fc-match</code>. Corrige à la fois les sous-titres ET les overlays.</div></div>
+  <div class="row"><div class="n">2</div><div><span class="em">Anti-flash</span> — un seul <code>Dialogue</code> par bloc avec karaoké inline <code>\k</code> au lieu d'un évènement par mot.</div></div>
+  <div class="row"><div class="n">3</div><div><span class="em">Transitions</span> — ajouter le zoom (<code>scale</code>/<code>zoompan</code>) au fondu, ou l'enlever du preview pour que les deux fassent un simple cut/fondu identique.</div></div>
+  <div class="row"><div class="n">4</div><div><span class="em">Overlays texte</span> — les passer en ASS (comme les sous-titres) au lieu de <code>drawtext</code> : boîte arrondie, wrap, même police.</div></div>
+  <p class="pill">Recommandé pour une amélioration nette cette semaine sans refonte. Restera « très proche » mais jamais bit-identique.</p>
+</div>
+
+<h3>Quick-win #1 — les polices (le plus rentable, ~15 min)</h3>
+<p>Rendre les polices bundlées visibles par fontconfig, une fois pour toutes :</p>
+<pre><span class="cm"># installer les .ttf du repo dans le fontconfig utilisateur</span>
+mkdir -p ~/.local/share/fonts/transcript
+cp frontend/public/fonts/*.ttf ~/.local/share/fonts/transcript/
+fc-cache -f
+fc-match <span class="str">"Anton"</span>   <span class="cm"># doit maintenant renvoyer Anton-Regular.ttf, plus Noto</span></pre>
+<p>Puis, côté ASS, ne demande plus <code>Bold=1</code> pour des fichiers mono-graisse (sinon libass
+re-matche et peut repartir sur Noto) :</p>
+<div class="diff">
+  <div class="col before"><div class="h">Avant — subtitles.py L153</div>
+<pre>Style: Default,{style[<span class="str">'font'</span>]},{fs},...,<span class="num">1</span>,<span class="num">0</span>,<span class="num">0</span>,<span class="num">0</span>,...
+<span class="cm">#                    Bold=1 ── force une graisse</span>
+<span class="cm">#                    absente du .ttf</span></pre></div>
+  <div class="col after"><div class="h">Après</div>
+<pre>Style: Default,{style[<span class="str">'font'</span>]},{fs},...,<span class="num">0</span>,<span class="num">0</span>,<span class="num">0</span>,<span class="num">0</span>,...
+<span class="cm"># Bold=0 : on utilise le .ttf tel quel</span>
+<span class="cm"># (Anton/Bebas sont déjà des display faces)</span></pre></div>
+</div>
+
+<h3>Quick-win #2 — le flash du karaoké</h3>
+<div class="diff">
+  <div class="col before"><div class="h">Avant — 1 évènement par mot (subtitles.py L205)</div>
+<pre><span class="kw">for</span> gi, word <span class="kw">in</span> <span class="fn">enumerate</span>(flat):
+    start = word[<span class="str">"start"</span>]
+    end = flat[gi+<span class="num">1</span>][<span class="str">"start"</span>] ...
+    main = <span class="fn">_render_block</span>(lines, gi, ...)
+    events.<span class="fn">append</span>(<span class="fn">_dialogue</span>(start, end, ...))
+<span class="cm"># N mots => N Dialogue => libass re-dessine</span>
+<span class="cm"># tout le bloc N fois => clignotement</span></pre></div>
+  <div class="col after"><div class="h">Après — 1 évènement, karaoké inline \k</div>
+<pre><span class="cm"># un seul Dialogue pour tout le bloc :</span>
+<span class="cm"># chaque mot porte {\kf&lt;centisec&gt;} ; libass</span>
+<span class="cm"># colore mot par mot SANS re-créer l'évènement</span>
+main = <span class="str">""</span>
+<span class="kw">for</span> w <span class="kw">in</span> flat:
+    cs = <span class="fn">round</span>((w[<span class="str">"end"</span>]-w[<span class="str">"start"</span>])*<span class="num">100</span>)
+    main += <span class="str">f"{{\\kf{cs}}}"</span> + <span class="fn">_esc</span>(w[<span class="str">"text"</span>])+<span class="str">" "</span>
+events.<span class="fn">append</span>(<span class="fn">_dialogue</span>(block_start, block_end, main))</pre></div>
+</div>
+<p class="muted">Avec la couleur primaire = <code>PrimaryColour</code> et la couleur highlight = <code>SecondaryColour</code>,
+<code>\kf</code> fait exactement le « remplissage » karaoké TikTok — un seul évènement stable, plus de flash.</p>
+
+<div class="rec">
+  <h3>Ma recommandation</h3>
+  <p class="verdict">Vu ta phrase « je veux télécharger <em>exactement</em> ce que je vois, en mieux » —
+  le seul chemin qui y répond vraiment est l'<span class="em">Option A</span> (un seul moteur, capture headless
+  de la composition React). C'est un vrai chantier mais c'est <em>la</em> raison pour laquelle opus.pro n'a pas ton problème.</p>
+  <p style="margin-bottom:0"><span class="em">Mais</span> commence par les <span class="em">quick-wins #1 et #2</span> de
+  l'Option B (polices + anti-flash) : c'est ~1 h de travail, ça corrige les deux défauts que tu ressens le plus fort
+  (mauvaise police + clignotement), et ça te laisse décider si l'écart résiduel justifie le passage à l'Option A.</p>
+</div>
+
+<h2>Prochaine étape</h2>
+<p>Dis-moi ce que tu veux et je l'implémente :</p>
+<ul>
+  <li><span class="em">A)</span> Partir sur le moteur unique (capture headless) — je te propose d'abord une archi + un prototype de la boucle de rendu.</li>
+  <li><span class="em">B)</span> Les quick-wins ffmpeg maintenant — je commence par les polices (#1) et l'anti-flash karaoké (#2), puis transitions et overlays.</li>
+</ul>
+
+</div>
+</body>
+</html>

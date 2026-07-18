@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { api } from "../api";
 import { usePlayhead } from "../usePlayhead";
-import { buildCues, activeCueIndex, isWordActive } from "../captions";
-import { frenchSpacing } from "../text";
+import { buildCues, activeCueIndex } from "../captions";
+import { CaptionBlock } from "./CaptionBlock";
 import { StylePanel } from "./StylePanel";
 import { TranslateBar } from "./TranslateBar";
 import { TranscriptPanel } from "./TranscriptPanel";
@@ -19,14 +19,6 @@ import { defaultFrameRect } from "../frame";
 import type { Clip, FitMode, Frame, Overlay, Project, Scene, SceneCut, Segment, Style } from "../types";
 
 const REFERENCE_WIDTH = 1080; // style authored against this (matches backend)
-
-function hexToRgba(hex: string, opacity: number): string {
-  const h = hex.replace("#", "");
-  const r = parseInt(h.slice(0, 2), 16);
-  const g = parseInt(h.slice(2, 4), 16);
-  const b = parseInt(h.slice(4, 6), 16);
-  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
-}
 
 export function Editor({ initial }: { initial: Project }) {
   const [project, setProject] = useState<Project>(initial);
@@ -123,8 +115,6 @@ export function Editor({ initial }: { initial: Project }) {
   );
   const cueIdx = activeCueIndex(cues, t);
   const cue = cueIdx >= 0 ? cues[cueIdx] : null;
-  const translation = cue ? cue.translation : "";
-
   // Captions size/position against the visible frame (not the whole source),
   // so the preview matches how they'll sit in the exported clip.
   const frameScale = videoWidth ? (frame.w * videoWidth) / REFERENCE_WIDTH : 0.4;
@@ -291,54 +281,34 @@ export function Editor({ initial }: { initial: Project }) {
     setProject(p);
   }
 
+  // Flush all debounced edits to disk now — the export reads the saved
+  // project.json, so everything must be persisted before a render starts.
+  async function flush() {
+    window.clearTimeout(saveTimer.current);
+    window.clearTimeout(overlayTimer.current);
+    window.clearTimeout(clipTimer.current);
+    window.clearTimeout(frameTimer.current);
+    window.clearTimeout(cutsTimer.current);
+    window.clearTimeout(sceneTimer.current);
+    await api.patchProject(project.id, {
+      style,
+      frame,
+      overlays,
+      clips,
+      scenes: project.scenes,
+      scene_cuts: sceneCuts,
+    });
+  }
+
   function seek(to: number) {
     const v = videoRef.current;
     if (v) v.currentTime = to + 0.001;
   }
 
-  const cap = (s: string) => (style.uppercase ? s.toUpperCase() : s);
   // French typographic spacing on the original line (French video) and the
-  // translation (translated into French), mirroring the export.
+  // translation (translated into French) is handled inside CaptionBlock.
   const frMain = (project.language || "").toLowerCase().startsWith("fr");
   const frTrans = (project.translate_to || "").toLowerCase().startsWith("fr");
-  const fmtMain = (s: string) => cap(frMain ? frenchSpacing(s) : s);
-  const fmtTrans = (s: string) => cap(frTrans ? frenchSpacing(s) : s);
-  const boxBg = style.box_enabled
-    ? hexToRgba(style.box_color, style.box_opacity)
-    : "transparent";
-
-  // One box wraps the whole caption block (all lines together), not per line.
-  const boxStyle: CSSProperties = style.box_enabled
-    ? {
-        background: boxBg,
-        padding: `${style.box_padding_y * frameScale}px ${style.box_padding_x * frameScale}px`,
-        borderRadius: `${style.box_radius * frameScale}px`,
-      }
-    : {};
-
-  const textStyle = (fontPx: number, color: string, strokePx: number): CSSProperties => ({
-    fontFamily: `"${style.font}"`,
-    fontSize: `${fontPx}px`,
-    color,
-    // A box replaces the per-glyph outline (matches the ASS export).
-    WebkitTextStroke: style.box_enabled ? undefined : `${strokePx}px ${style.outline_color}`,
-    paintOrder: "stroke fill",
-  });
-
-  const translationRow = style.translation_enabled && translation ? (
-    <div className="cap-row" key="trans">
-      <span
-        className="cap-box"
-        style={textStyle(
-          style.font_size * frameScale * style.translation_scale,
-          style.translation_color,
-          style.outline_width * frameScale * 0.6
-        )}
-      >
-        {fmtTrans(translation)}
-      </span>
-    </div>
-  ) : null;
 
   return (
     <div className="editor">
@@ -432,44 +402,7 @@ export function Editor({ initial }: { initial: Project }) {
             />
           )}
           {cue && !editingSecondaryCrop && (
-            <div className={`caption pos-${style.position}`} style={captionPos(style, frameScale)}>
-              <div className="caption-box" style={boxStyle}>
-              {style.translation_position === "above" && translationRow}
-              {cue.lines.length > 0
-                ? cue.lines.map((line, li) => (
-                    <div className="cap-row" key={li}>
-                      <span
-                        className="cap-box"
-                        style={textStyle(style.font_size * frameScale, style.primary_color, style.outline_width * frameScale)}
-                      >
-                        {line.map((w, wi) => (
-                          <span
-                            key={wi}
-                            style={
-                              style.highlight_enabled && isWordActive(w, t)
-                                ? { color: style.highlight_color }
-                                : undefined
-                            }
-                          >
-                            {fmtMain(w.text)}{" "}
-                          </span>
-                        ))}
-                      </span>
-                    </div>
-                  ))
-                : (
-                  <div className="cap-row">
-                    <span
-                      className="cap-box"
-                      style={textStyle(style.font_size * frameScale, style.primary_color, style.outline_width * frameScale)}
-                    >
-                      {fmtMain(cue.text)}
-                    </span>
-                  </div>
-                )}
-              {style.translation_position === "below" && translationRow}
-              </div>
-            </div>
+            <CaptionBlock style={style} cue={cue} t={t} scale={frameScale} frMain={frMain} frTrans={frTrans} />
           )}
           </div>
           </div>
@@ -545,11 +478,13 @@ export function Editor({ initial }: { initial: Project }) {
         {tab === "clips" && (
           <>
             <ClipPanel
+              projectId={project.id}
               clips={clips}
               selectedId={selectedClipId}
               onSelect={setSelectedClipId}
               onChange={updateClips}
               onPreview={previewClip}
+              flush={flush}
             />
             {selectedClip && (
               <TranscriptPanel
@@ -596,9 +531,3 @@ function fmtTime(s: number): string {
   return `${m}:${sec.toString().padStart(2, "0")}`;
 }
 
-function captionPos(style: Style, scale: number): CSSProperties {
-  const m = style.margin_v * scale;
-  if (style.position === "top") return { top: m };
-  if (style.position === "middle") return { top: "50%", transform: "translateY(-50%)" };
-  return { bottom: m };
-}

@@ -2,3 +2,6 @@ fastapi>=0.110
 uvicorn[standard]>=0.27
 python-multipart>=0.0.9
 httpx>=0.27
+# Clip export renders the preview in a headless browser (app/render.py).
+# After installing, run: playwright install chrome  (see scripts/setup-render.sh)
+playwright>=1.40

@@ -1,4 +1,14 @@
-import type { Aspect } from "./types";
+import type { Aspect, Project } from "./types";
+
+/** Output resolution of a project = the crop window in source pixels, rounded to
+ *  even dimensions (H.264 needs even w/h). This is the canvas the export renders
+ *  into; the page reports it so the backend never has to recompute geometry. */
+export function outputSize(project: Project): { w: number; h: number } {
+  const mw = project.width || 1920;
+  const mh = project.height || 1080;
+  const even = (v: number) => Math.max(2, Math.round(v / 2) * 2);
+  return { w: even(project.frame.w * mw), h: even(project.frame.h * mh) };
+}
 
 const PRESET: Record<"9:16" | "1:1" | "4:5" | "16:9", number> = {
   "9:16": 9 / 16,

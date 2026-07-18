@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse
 
-from . import media, pipeline, segments as segment_ops, store, subtitles, translate
+from . import exports, media, pipeline, segments as segment_ops, store, subtitles, translate
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -230,3 +230,39 @@ def get_video(project_id: str) -> FileResponse:
         raise HTTPException(404, "Video missing")
     # FileResponse honours Range requests, so the <video> element can seek.
     return FileResponse(path)
+
+
+# --- clip export / render ---------------------------------------------------
+
+@router.post("/{project_id}/renders")
+def start_renders(project_id: str, body: dict) -> list[dict]:
+    """Start rendering one or more clips. `body.clip_ids` empty/absent = all."""
+    project = store.get(project_id)
+    if project is None:
+        raise HTTPException(404, "Unknown project")
+    clips = project.get("clips", [])
+    wanted = body.get("clip_ids") or [c["id"] for c in clips]
+    todo = [c for c in clips if c["id"] in wanted]
+    if not todo:
+        raise HTTPException(400, "Aucun clip à exporter")
+    return exports.enqueue_clips(project_id, todo)
+
+
+@router.get("/{project_id}/renders")
+def list_renders(project_id: str) -> list[dict]:
+    if store.get(project_id) is None:
+        raise HTTPException(404, "Unknown project")
+    return exports.list_for(project_id)
+
+
+@router.get("/{project_id}/renders/{job_id}/file")
+def render_file(project_id: str, job_id: str) -> FileResponse:
+    job = exports.get(job_id)
+    if job is None or job["project_id"] != project_id:
+        raise HTTPException(404, "Unknown render job")
+    if job["status"] != "done":
+        raise HTTPException(409, "Rendu non terminé")
+    path = store.project_dir(project_id) / "exports" / job["filename"]
+    if not path.exists():
+        raise HTTPException(404, "Fichier introuvable")
+    return FileResponse(path, media_type="video/mp4", filename=job["filename"])

@@ -1,4 +1,4 @@
-import type { Project, Scene } from "./types";
+import type { Project, RenderJob, Scene } from "./types";
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -87,6 +87,20 @@ export const api = {
 
   async deleteScene(id: string, sceneId: string): Promise<Scene[]> {
     return json(await fetch(`/api/projects/${id}/scenes/${sceneId}`, { method: "DELETE" }));
+  },
+
+  async startRenders(id: string, clipIds?: string[]): Promise<RenderJob[]> {
+    return json(
+      await fetch(`/api/projects/${id}/renders`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clip_ids: clipIds ?? [] }),
+      })
+    );
+  },
+
+  async listRenders(id: string): Promise<RenderJob[]> {
+    return json(await fetch(`/api/projects/${id}/renders`));
   },
 
   videoUrl(id: string): string {

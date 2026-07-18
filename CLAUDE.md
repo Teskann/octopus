@@ -13,9 +13,11 @@ B-roll**). Everything runs on this machine — no cloud calls.
 Target GPU: **AMD RX 6900 XT** (`gfx1030`, RDNA2) on **ROCm 7.x**.
 
 Status: the **editor + live preview** is built (Phases 1–4 + many refinements).
-The **ffmpeg export/render pipeline (Phase 5) is NOT built yet** — nothing burns
-the subtitles/overlays/reframe/scene-switches to an MP4 file; the preview is the
-editor view only. See `ROADMAP.md`.
+**Phase 5 — export — is built as a headless-browser renderer** ("one renderer",
+not an ffmpeg filtergraph): a clip renders to MP4 by loading the frontend's own
+preview route in headless Chrome and screenshotting it frame by frame, so the
+export matches the preview by construction (same fonts/blur/karaoke/overlays).
+See `ROADMAP.md` and the **Export** section below.
 
 ## Architecture — three moving parts
 
@@ -84,18 +86,27 @@ projects keep working — always add new fields there.
 - `editor.py` — the projects API (`/api/projects…`): create/list/get, `PATCH`
   (allowed keys: name, style, frame, translate_to, overlays, clips, scenes,
   scene_cuts), segment edit/split/merge/delete, asset upload/serve, scene
-  upload/serve/delete, `/translate`, `/subtitles.ass`, video + scene video (Range
-  supported via `FileResponse`).
+  upload/serve/delete, `/translate`, `/subtitles.ass`, **`/renders`** (POST start
+  clip export(s) · GET job list · GET `/renders/{job}/file` download), video +
+  scene video (Range supported via `FileResponse`).
+- `render.py` — **Phase 5 export**: drives headless Chrome (Playwright) to the
+  frontend's `?render=1` route, steps it via `window.__render.seek(t)`,
+  screenshots each frame (JPEG `RENDER_JPEG_QUALITY`), then muxes the clip's
+  source audio. Frames are split into contiguous chunks captured by
+  `RENDER_PARALLELISM` browsers **in parallel** (each writes
+  `<name>_frames/{i:06d}.jpg`); ffmpeg assembles the sequence. `exports.py` —
+  in-memory render-job queue + bounded `ThreadPoolExecutor` (`EXPORT_CONCURRENCY`,
+  clips at once); files land in `exports/`.
 - `store.py` — Project persistence (JSON + in-memory cache + lock),
   defaults/migrations, `SCENE_COLORS` palette.
 - `pipeline.py` — background processing worker. `whisper.py` — whisper-cli client
   (parses full JSON → words). `media.py` — ffprobe. `transcription.py` —
   ffmpeg audio extract + the legacy Voxtral client. `segments.py` — text edit /
-  split / merge (re-derives word timings). `subtitles.py` — **ASS generator**
-  (the single source of truth for the burned-in look; Phase 5 export will use
-  it), incl. French non-breaking-space typography (`french_spacing`). `translate.py`
-  — llama-server translation with anti-refusal + completeness retries + Markdown
-  stripping.
+  split / merge (re-derives word timings). `subtitles.py` — **ASS generator** for
+  the `/subtitles.ass` download (no longer used by export — the headless renderer
+  reuses the React captions), incl. French spacing (`french_spacing`).
+  `translate.py` — llama-server translation with anti-refusal + completeness
+  retries + Markdown stripping.
 
 ## Frontend files (`frontend/src/`)
 
@@ -110,8 +121,17 @@ projects keep working — always add new fields there.
 - `OverlayLayer.tsx` (preview, drag/resize/edit) + `OverlayPanel.tsx` (controls).
 - `Timeline.tsx` — scrub/seek, drag-select → clip, clip bands, and **active-scene
   color bands**.
-- `ClipPanel.tsx` — clip list/edit/preview. `ScenePanel.tsx` — **Cadrage** (aspect
-  + per-scene crop/fit) + scene import/delete + scene-cut list.
+- `ClipPanel.tsx` — clip list/edit/preview + **export** (per-clip "Exporter" and
+  "Exporter tous les clips") with a polled render-job list (progress/download).
+  `ScenePanel.tsx` — **Cadrage** (aspect + per-scene crop/fit) + scene
+  import/delete + scene-cut list.
+- `RenderPage.tsx` — the **export route** (`?render=1&project=…&clip=…`): mounts
+  the bare composition (reframe + scenes + overlays + `CaptionBlock`) sized to the
+  output resolution, seeks deterministically, and publishes `window.__render`
+  (`ready`/`meta`/`seek`) that `app/render.py` drives. `main.tsx` routes here when
+  `?render=1`.
+- `CaptionBlock.tsx` — the caption block, **shared** by the editor preview and the
+  render page so what you see and what you export come from the same DOM/CSS.
 - `ReframeBox.tsx` — the draggable/zoomable crop rectangle (used for the main and
   for editing a secondary scene's crop). `SceneSourceVideo.tsx` — a secondary
   scene's raw source shown full while reframing it. `SceneStage.tsx` — composites
@@ -176,6 +196,18 @@ crop `frame.x/y/w/h`) is the **output window** and holds the captions.
   `max-width/max-height:none`. This was a real bug.
 - **Caption z-index** must stay above scene overlays (`.caption { z-index:5 }` >
   `.scene-overlay.active { z-index:2 }`), else subtitles hide behind B-roll.
+- **Export needs real Chrome, not Playwright's Chromium** — the source is
+  H.264/AAC, which open-source Chromium can't decode (black frames). `render.py`
+  launches `channel="chrome"`; install once with `playwright install chrome`
+  (`scripts/setup-render.sh`). Export also needs the frontend reachable at
+  `RENDER_BASE_URL` (default the Vite dev server `:5173`).
+- **Export = one renderer.** Captions come from the SHARED `CaptionBlock`, and the
+  render page reuses `captions.ts`/`frame.ts`/`scenes.ts` + the preview CSS — so
+  keep those pure and shared, don't fork a second look for export. Geometry is
+  reported by the page (`frame.outputSize`), so the backend never recomputes it.
+- **`ClipPanel.exportClips` flushes edits first** (`Editor.flush` → `patchProject`)
+  because the render reads the saved `project.json`, but the editor saves on a
+  400 ms debounce.
 - **whisper.cpp / ROCm**: gfx1030 is natively supported — do NOT set
   `HSA_OVERRIDE_GFX_VERSION`. Build with `-DGGML_HIP=ON -DAMDGPU_TARGETS=gfx1030`.
   For llama.cpp/Voxtral keep **Flash-Attention OFF** on gfx1030 (`--flash-attn off`
@@ -197,15 +229,28 @@ crop `frame.x/y/w/h`) is the **output window** and holds the captions.
 ./scripts/run-app.sh              # FastAPI :8000 (single worker)
 cd frontend && npm install && npm run dev   # Vite :5173 (proxies /api → :8000)
 ./scripts/fetch-fonts.sh          # bundle TikTok caption fonts (frontend/src/fonts.css)
+./scripts/setup-render.sh         # export deps: pip install playwright + `playwright install chrome`
 ```
 
 Open <http://127.0.0.1:5173>. Env vars in `app/config.py` (WHISPER_*, LLAMA_*,
-TRANSLATE_*, CHUNK_SECONDS, …).
+TRANSLATE_*, CHUNK_SECONDS, `EXPORT_CONCURRENCY`, `RENDER_PARALLELISM`,
+`RENDER_JPEG_QUALITY`, `RENDER_BASE_URL`, `RENDER_BROWSER_CHANNEL`,
+`RENDER_BROWSER_EXECUTABLE`, …). Export needs `ffmpeg` (libx264 + aac) and Chrome.
 
 ## Next up
 
-**Phase 5 — export/render (ffmpeg):** turn a clip into an MP4 applying, in order:
-reframe (crop/scale per scene) + blur-fill, scene switches (overlay active scene
-per `scene_cuts` with the zoom-punch), burn the ASS subtitles (`subtitles.py`),
-image/text overlays, then a render job with progress + download. The ASS
-generator and all the data are ready; nothing renders yet.
+**Phase 5 — export: DONE** (headless-browser renderer, `app/render.py` +
+`RenderPage.tsx`). Scene switches now **crossfade** (zoom-punch) via the shared
+`scenes.ts sceneLayersAt`, which also `cleanCuts` (drops redundant/self cuts) and
+leads the fade slightly before the cut (`TRANSITION_DUR`/`TRANSITION_LEAD`) — the
+**editor preview still uses its own CSS transition**, so wire it to
+`sceneLayersAt` too if they should match exactly. Open refinements: **speed**
+(parallel across
+`RENDER_PARALLELISM` browsers + JPEG capture; could still reuse browsers across
+clips or add VAAPI GPU encode), **overlay↔B-roll stacking** (render draws
+overlays above B-roll; the editor
+preview can draw them behind), and **VAAPI GPU encode** on gfx1030 (currently CPU
+libx264).
+
+**Phase 6 — polish:** style presets, project list (rename/delete), load models on
+demand to fit VRAM, package as a desktop-feeling local app.

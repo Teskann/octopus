@@ -107,6 +107,19 @@ export interface Clip {
   end: number;
 }
 
+export interface RenderJob {
+  id: string;
+  clip_id: string;
+  clip_name: string;
+  status: "queued" | "running" | "done" | "error";
+  progress: number;
+  message: string;
+  error: string | null;
+  filename: string;
+  created_at: string;
+  download: string | null;
+}
+
 export type ProjectStatus = "created" | "processing" | "ready" | "error";
 
 export interface Project {

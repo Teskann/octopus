@@ -409,7 +409,21 @@ body {
   width: 100%; background: #0f172a; color: var(--text);
   border: 1px solid var(--border); border-radius: 6px; padding: 0.4rem 0.5rem; font-size: 1rem;
 }
-.clip-actions { display: flex; justify-content: space-between; align-items: center; }
+.clip-actions { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+
+/* ---- Clip export / render jobs ---------------------------------------- */
+.render-jobs { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 0.7rem; }
+.render-jobs h4 { margin: 0 0 0.5rem; font-size: 0.9rem; color: var(--muted); }
+.render-job {
+  display: flex; justify-content: space-between; align-items: center; gap: 0.6rem;
+  padding: 0.35rem 0; font-size: 0.9rem;
+}
+.render-job-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.render-bar { flex: 1; height: 8px; background: #0f172a; border-radius: 999px; overflow: hidden; max-width: 120px; }
+.render-bar-fill { display: block; height: 100%; background: var(--accent); transition: width 0.2s; }
+.render-tag { font-size: 0.82rem; padding: 0.15rem 0.55rem; border-radius: 999px; text-decoration: none; white-space: nowrap; }
+.render-tag.done { background: #16351f; color: #7ee8a6; border: 1px solid #24522f; }
+.render-tag.error { background: #3a1f1f; color: #ff8f8f; border: 1px solid #5a2a2a; }
 
 /* ---- Project reframe window + clip-from-transcript --------------------- */
 .reframe-layer { position: absolute; inset: 0; pointer-events: none; }
