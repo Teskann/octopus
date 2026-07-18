@@ -446,7 +446,9 @@ body {
 .scene-overlay {
   position: absolute; inset: 0; overflow: hidden; background: #000;
   opacity: 0; transform: scale(1.08); pointer-events: none;
-  transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+  /* Duration matches scenes.ts TRANSITION_DUR so the preview crossfade lasts as
+     long as the exported one (the zoom-punch 1.08→1 already matches). */
+  transition: opacity 0.35s ease-out, transform 0.35s ease-out;
 }
 .scene-overlay.active { opacity: 1; transform: scale(1); z-index: 2; }
 /* max-width/height:none is essential: a crop video is sized past 100% to map its

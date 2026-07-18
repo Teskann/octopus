@@ -14,7 +14,7 @@ import { ReframeBox } from "./ReframeBox";
 import { SceneStage } from "./SceneStage";
 import { ScenePanel } from "./ScenePanel";
 import { SceneSourceVideo } from "./SceneSourceVideo";
-import { activeSceneId } from "../scenes";
+import { activeSceneId, cleanCuts, TRANSITION_DUR, TRANSITION_LEAD } from "../scenes";
 import { defaultFrameRect } from "../frame";
 import type { Clip, FitMode, Frame, Overlay, Project, Scene, SceneCut, Segment, Style } from "../types";
 
@@ -119,7 +119,14 @@ export function Editor({ initial }: { initial: Project }) {
   // so the preview matches how they'll sit in the exported clip.
   const frameScale = videoWidth ? (frame.w * videoWidth) / REFERENCE_WIDTH : 0.4;
   const selectedClip = clips.find((c) => c.id === selectedClipId) || null;
-  const activeScene = project.scenes.find((s) => s.id === activeSceneId(sceneCuts, t)) || null;
+  // Scene shown at the playhead. Query the CLEANED cuts (no self/redundant
+  // switches, like the export) shifted by (lead + dur): the CSS crossfade below
+  // starts when `active` toggles and lasts TRANSITION_DUR, so it *completes*
+  // TRANSITION_LEAD before the cut — matching the export (scenes.ts sceneLayersAt).
+  const activeScene =
+    project.scenes.find(
+      (s) => s.id === activeSceneId(cleanCuts(sceneCuts), t + TRANSITION_LEAD + TRANSITION_DUR)
+    ) || null;
   const selectedScene = project.scenes.find((s) => s.id === selectedSceneId) || null;
 
   // A scene's crop, falling back to a centered output-aspect rect when it is

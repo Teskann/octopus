@@ -242,10 +242,11 @@ TRANSLATE_*, CHUNK_SECONDS, `EXPORT_CONCURRENCY`, `RENDER_PARALLELISM`,
 **Phase 5 — export: DONE** (headless-browser renderer, `app/render.py` +
 `RenderPage.tsx`). Scene switches now **crossfade** (zoom-punch) via the shared
 `scenes.ts sceneLayersAt`, which also `cleanCuts` (drops redundant/self cuts) and
-leads the fade slightly before the cut (`TRANSITION_DUR`/`TRANSITION_LEAD`) — the
-**editor preview still uses its own CSS transition**, so wire it to
-`sceneLayersAt` too if they should match exactly. Open refinements: **speed**
-(parallel across
+leads the fade slightly before the cut (`TRANSITION_DUR`/`TRANSITION_LEAD`). The
+**editor preview matches it**: `Editor.activeScene` queries `cleanCuts` shifted by
+`(lead + dur)` so its `SceneStage` CSS crossfade (duration = `TRANSITION_DUR`,
+zoom 1.08→1) completes at the same lead-adjusted moment; `Timeline` bands use
+`cleanCuts` too. Open refinements: **speed** (parallel across
 `RENDER_PARALLELISM` browsers + JPEG capture; could still reuse browsers across
 clips or add VAAPI GPU encode), **overlay↔B-roll stacking** (render draws
 overlays above B-roll; the editor

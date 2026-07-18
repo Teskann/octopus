@@ -109,14 +109,22 @@ function RenderStage({ project, clip }: { project: Project; clip: { start: numbe
   const cueIdx = activeCueIndex(cues, t);
   const cue = cueIdx >= 0 ? cues[cueIdx] : null;
 
-  // Seek EVERY mounted video to `time` and resolve once they've all reported
-  // `seeked` and the page has painted (two rAFs). Seeking all (not just the
-  // visible scene) fixes some subliminal frames — a scene otherwise showed its
-  // frame 0 for one capture when it appeared before its own seek applied. Videos
-  // already at `time` are skipped so we never wait on a `seeked` that won't fire.
+  // Seek EVERY mounted video to `time`, then resolve once they've reported
+  // `seeked` and the page has painted (two rAFs). Two subtleties fixed here:
+  //  - Seeking ALL scenes (not just the visible one) keeps hidden scenes warm.
+  //  - A paused <video> that was hidden (opacity:0) keeps DISPLAYING its last
+  //    presented frame (frame 0 at the clip start) even after we seek it — the
+  //    browser doesn't repaint an invisible, paused element. When the scene
+  //    reappears it briefly shows that stale frame 0. So for the currently
+  //    VISIBLE videos we force a fresh presentation with a play()→pause() nudge
+  //    (a muted video is allowed to autoplay). Only 1-2 videos, so it's cheap.
   function seek(time: number): Promise<void> {
     return new Promise((resolve) => {
       setT(time);
+      const visible = new Set(
+        sceneLayersAt(project.scene_cuts, time)
+          .flatMap((l) => [...(videos.current.get(l.sceneId) || new Set<HTMLVideoElement>())])
+      );
       const vids = allVideos().filter(
         (v) => v.readyState >= 1 && Math.abs(v.currentTime - time) > 0.001
       );
@@ -131,7 +139,12 @@ function RenderStage({ project, clip }: { project: Project; clip: { start: numbe
       for (const v of vids) {
         const on = () => {
           v.removeEventListener("seeked", on);
-          done();
+          if (visible.has(v)) {
+            // Force the paused, freshly-visible video to present its seeked frame.
+            v.play().then(() => v.pause()).catch(() => {}).finally(done);
+          } else {
+            done();
+          }
         };
         v.addEventListener("seeked", on);
         try {

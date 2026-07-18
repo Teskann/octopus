@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent } from "react";
 import type { Clip, Scene, SceneCut } from "../types";
+import { cleanCuts } from "../scenes";
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
 
@@ -47,7 +48,7 @@ export function Timeline({
   const sceneColor = (id: string) => scenes.find((s) => s.id === id)?.color ?? "#334155";
   const bands: { start: number; end: number; color: string }[] = [];
   if (duration && scenes.length > 1) {
-    const sorted = [...cuts].sort((a, b) => a.time - b.time);
+    const sorted = cleanCuts(cuts); // drop redundant/self cuts, like the render
     let prev = 0;
     let prevScene = "main";
     for (const c of sorted) {
