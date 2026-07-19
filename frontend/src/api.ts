@@ -1,4 +1,12 @@
-import type { Preset, Project, ProjectSummary, RenderJob, Scene, Style } from "./types";
+import type {
+  ContextPreset,
+  Preset,
+  Project,
+  ProjectSummary,
+  RenderJob,
+  Scene,
+  Style,
+} from "./types";
 
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -36,6 +44,16 @@ export const api = {
 
   async deleteProject(id: string): Promise<unknown> {
     return json(await fetch(`/api/projects/${id}`, { method: "DELETE" }));
+  },
+
+  async retranscribe(id: string): Promise<unknown> {
+    return json(
+      await fetch(`/api/projects/${id}/retranscribe`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      })
+    );
   },
 
   async patchProject(id: string, patch: Partial<Project>): Promise<Project> {
@@ -164,6 +182,24 @@ export const api = {
 
   async deletePreset(id: string): Promise<unknown> {
     return json(await fetch(`/api/presets/${id}`, { method: "DELETE" }));
+  },
+
+  async listContextPresets(): Promise<ContextPreset[]> {
+    return json(await fetch("/api/context-presets"));
+  },
+
+  async saveContextPreset(name: string, prompt: string): Promise<ContextPreset> {
+    return json(
+      await fetch("/api/context-presets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, prompt }),
+      })
+    );
+  },
+
+  async deleteContextPreset(id: string): Promise<unknown> {
+    return json(await fetch(`/api/context-presets/${id}`, { method: "DELETE" }));
   },
 
   videoUrl(id: string): string {

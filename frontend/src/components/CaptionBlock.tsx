@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import type { Cue } from "../captions";
 import { isWordActive } from "../captions";
-import { frenchSpacing } from "../text";
+import { frenchSpacing, hugsNext, hugsPrev } from "../text";
 import type { Style } from "../types";
 
 /** The on-screen caption block. Single source of truth shared by the editor
@@ -76,18 +76,25 @@ export function CaptionBlock({
                 className="cap-box"
                 style={textStyle(style.font_size * scale, style.primary_color, style.outline_width * scale)}
               >
-                {line.map((w, wi) => (
-                  <span
-                    key={wi}
-                    style={
-                      style.highlight_enabled && isWordActive(w, t)
-                        ? { color: style.highlight_color }
-                        : undefined
-                    }
-                  >
-                    {fmtMain(w.text)}{" "}
-                  </span>
-                ))}
+                {line.map((w, wi) => {
+                  const next = line[wi + 1];
+                  // Non-breaking space when a French sign hugs this join, so the
+                  // browser can't drop a lone "?" or "»" onto its own line.
+                  const sep = hugsNext(w.text) || (next && hugsPrev(next.text)) ? "\u00A0" : " ";
+                  return (
+                    <span
+                      key={wi}
+                      style={
+                        style.highlight_enabled && isWordActive(w, t)
+                          ? { color: style.highlight_color }
+                          : undefined
+                      }
+                    >
+                      {fmtMain(w.text)}
+                      {sep}
+                    </span>
+                  );
+                })}
               </span>
             </div>
           ))

@@ -113,6 +113,63 @@ def delete_segment(project_id: str, segment_id: str) -> list[dict]:
                  f"/api/projects/{project_id}/segments/{segment_id}").json()
 
 
+# --- context / (re)transcription -------------------------------------------
+@mcp.tool()
+def get_context(project_id: str) -> str:
+    """The whisper context/prompt saved on this project — the initial context that
+    steers spelling of names, jargon and acronyms on (re)transcription."""
+    return _project(project_id).get("whisper_prompt", "")
+
+
+@mcp.tool()
+def set_context(project_id: str, prompt: str) -> str:
+    """Set the whisper context/prompt (names, jargon, acronyms, a one-line summary
+    of the video…). Saved on the project and used the next time it is
+    transcribed. Pass "" to clear it. Does NOT re-transcribe — call retranscribe
+    to apply it now."""
+    return _patch(project_id, {"whisper_prompt": prompt}).get("whisper_prompt", "")
+
+
+@mcp.tool()
+def retranscribe(project_id: str, prompt: str | None = None,
+                 language: str | None = None) -> dict:
+    """Re-run whisper on the source video, replacing all segments + word timings.
+    Optionally set the context `prompt` (persisted) and/or force a `language`
+    (else the detected one is reused). Runs in the background — poll get_project's
+    status/progress. Corrections and translations are lost; style/frame/clips/
+    overlays are kept."""
+    body: dict[str, Any] = {}
+    if prompt is not None:
+        body["prompt"] = prompt
+    if language is not None:
+        body["language"] = language
+    return _call("POST", f"/api/projects/{project_id}/retranscribe", json=body).json()
+
+
+@mcp.tool()
+def list_context_presets() -> list[dict]:
+    """User-saved context presets [{id, name, prompt}]. Load one onto a project
+    with apply_context_preset."""
+    return _call("GET", "/api/context-presets").json()
+
+
+@mcp.tool()
+def save_context_preset(name: str, prompt: str) -> dict:
+    """Save a reusable, named context preset (prompt) shared by every project."""
+    return _call("POST", "/api/context-presets",
+                 json={"name": name, "prompt": prompt}).json()
+
+
+@mcp.tool()
+def apply_context_preset(project_id: str, name: str) -> str:
+    """Load a context preset by name onto a project (sets its whisper_prompt).
+    Does NOT re-transcribe — call retranscribe to apply it now."""
+    for p in list_context_presets():
+        if p["name"].lower() == name.lower():
+            return set_context(project_id, p["prompt"])
+    raise RuntimeError(f"Préréglage de contexte introuvable: {name}")
+
+
 # --- clips ------------------------------------------------------------------
 @mcp.tool()
 def list_clips(project_id: str) -> list[dict]:

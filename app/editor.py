@@ -40,6 +40,29 @@ async def create_project(
     return {"id": project["id"]}
 
 
+@router.post("/{project_id}/retranscribe")
+def retranscribe(project_id: str, body: dict | None = None) -> dict:
+    """Re-run transcription on the existing source video, replacing the current
+    segments/word timings. Reuses the detected language unless one is given."""
+    project = store.get(project_id)
+    if project is None:
+        raise HTTPException(404, "Unknown project")
+    body = body or {}
+    language = (body.get("language") or project.get("language") or "").strip()
+    # Optional context/prompt: persist it so it steers this run (and is reused on
+    # the next). Passing "" clears it; omitting it keeps the stored one.
+    if body.get("prompt") is not None:
+        project["whisper_prompt"] = str(body["prompt"])
+    project.update(status="processing", progress=0.0, message="Relance…", error="")
+    store.save(project)
+    threading.Thread(
+        target=pipeline.process_project,
+        args=(project_id, language or None),
+        daemon=True,
+    ).start()
+    return {"status": "processing"}
+
+
 @router.get("")
 def list_projects() -> list[dict]:
     return store.list_projects()
@@ -79,7 +102,7 @@ def delete_project(project_id: str) -> dict:
 def patch_project(project_id: str, patch: dict) -> dict:
     # Only editable top-level keys may be patched from the client.
     allowed = {"name", "style", "frame", "translate_to", "overlays", "clips",
-               "scenes", "scene_cuts"}
+               "scenes", "scene_cuts", "whisper_prompt"}
     clean = {k: v for k, v in patch.items() if k in allowed}
     project = store.update(project_id, clean)
     if project is None:

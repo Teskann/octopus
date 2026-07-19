@@ -138,6 +138,12 @@ export interface Preset {
   style: Style;
 }
 
+export interface ContextPreset {
+  id: string;
+  name: string;
+  prompt: string;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -150,6 +156,7 @@ export interface Project {
   height: number;
   fps: number;
   language: string;
+  whisper_prompt: string;
   translate_to: string | null;
   translate_status: "idle" | "running" | "done" | "error";
   translate_progress: number;

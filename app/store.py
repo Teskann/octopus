@@ -110,6 +110,9 @@ def new_project(name: str, source_filename: str) -> dict:
         "height": 0,
         "fps": 0.0,
         "language": "",
+        # Optional context/prompt fed to whisper on (re)transcription to steer
+        # spelling of names/jargon (see whisper.py --prompt).
+        "whisper_prompt": "",
         "translate_to": None,
         "translate_status": "idle",   # idle | running | done | error
         "translate_progress": 0.0,
@@ -169,6 +172,7 @@ def get(project_id: str) -> dict | None:
         sc.setdefault("crop", {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0})
         sc.setdefault("color", SCENE_COLORS[i % len(SCENE_COLORS)])
     project.setdefault("scene_cuts", [])
+    project.setdefault("whisper_prompt", "")
     project.setdefault("translations", {})
     project.setdefault("translate_status", "idle")
     project.setdefault("translate_progress", 0.0)

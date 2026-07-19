@@ -51,7 +51,12 @@ export function App() {
         />
       )}
 
-      {view.name === "editor" && <Editor initial={view.project} />}
+      {view.name === "editor" && (
+        <Editor
+          initial={view.project}
+          onReprocess={(id) => setView({ name: "processing", id })}
+        />
+      )}
     </div>
   );
 }

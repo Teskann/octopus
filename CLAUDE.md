@@ -185,6 +185,15 @@ crop `frame.x/y/w/h`) is the **output window** and holds the captions.
 
 ## Gotchas & lessons (read before editing)
 
+- **The playhead `t` ticks at 60fps — never let a big subtree re-render on it.**
+  `usePlayhead` re-renders `Editor` (and children) every frame; nothing is
+  `React.memo`'d by default. Passing live `t` into a large list (the transcript
+  is hundreds of segments × word spans) reconciled it 60×/s, starving the video
+  decoder → **the preview stuttered while the export was perfectly synced** (the
+  giveaway that it's a main-thread cost, not an A/V-sync bug). Fix pattern
+  (`TranscriptPanel.tsx`): memoise the row, feed live `t` ONLY to the active row
+  (others get a constant so their props stay stable), and stabilise every
+  callback (wrap Editor's per-render `seek`/`reload`/… in refs) so the memo bails.
 - **The user co-develops this repo between turns.** Prefer `Edit` over `Write`;
   re-`Read` a file right before changing it; if content contradicts your memory,
   surface it. (A `Write` once clobbered a hand-edited file.) See memory
@@ -216,6 +225,14 @@ crop `frame.x/y/w/h`) is the **output window** and holds the captions.
   For llama.cpp/Voxtral keep **Flash-Attention OFF** on gfx1030 (`--flash-attn off`
   in `run-voxtral.sh`) — the HIP FA kernel aborts. `MODEL_NAME` must equal the
   server `--alias`. Load Voxtral with `-hf` (pulls the mmproj/audio encoder).
+- **whisper-cli needs `-nfa` for word timing.** DTW (`--dtw`) is what gives
+  accurate per-word timestamps, but whisper.cpp **silently disables DTW when flash
+  attention is on** ("not supported with flash_attn - disabling") and the CLI
+  enables FA by default. So `app/whisper.py` passes `-nfa` (`--no-flash-attn`)
+  whenever `WHISPER_DTW` is set — without it every `t_dtw` is `-1` and word times
+  fall back to the coarse decoder `offsets` (visibly wrong karaoke sync). The
+  transcribe log prints the DTW hit-rate (`DTW timing on N/M tokens`) — it must be
+  ~100%.
 - **Single uvicorn worker** — projects are cached in-memory and written to disk;
   state does not scale across workers.
 - **No test suite / linter configured.** Ad-hoc verification is done by importing

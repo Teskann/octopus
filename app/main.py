@@ -7,11 +7,12 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 
-from . import config, editor, jobs, presets
+from . import config, context_presets, editor, jobs, presets
 
 app = FastAPI(title="Transcript")
 app.include_router(editor.router)
 app.include_router(presets.router)
+app.include_router(context_presets.router)
 
 STATIC_DIR = Path(__file__).parent / "static"
 

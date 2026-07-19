@@ -46,7 +46,8 @@ def process_project(project_id: str, language: str | None) -> None:
                  message=f"Transcribing… {pct}%")
 
         detected, segments = whisper.transcribe(
-            wav_path, language, progress_cb=on_progress)
+            wav_path, language, progress_cb=on_progress,
+            prompt=project.get("whisper_prompt") or None)
 
         seg_dicts = []
         for i, seg in enumerate(segments):

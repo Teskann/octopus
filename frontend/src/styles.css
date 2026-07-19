@@ -29,6 +29,7 @@ body {
 
 /* Consistently styled form controls everywhere (selects were unstyled before). */
 select,
+textarea,
 input[type="text"],
 input[type="search"],
 input[type="number"] {
@@ -301,6 +302,19 @@ input[type="checkbox"]:checked::after {
   width: 100%; height: 34px; border: 1px solid var(--border);
   border-radius: 6px; background: none; cursor: pointer;
 }
+
+/* Whisper context/prompt panel (same card look as .style-panel). */
+.context-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 0.8rem 1rem 1rem;
+}
+.context-panel .row.col {
+  display: flex; flex-direction: column; gap: 0.35rem;
+  font-size: 0.9rem; color: var(--muted); margin-bottom: 0.7rem;
+}
+.context-input { width: 100%; resize: vertical; line-height: 1.35; }
 
 .caption { flex-direction: column; align-items: center; width: 100%; }
 /* One box wraps every line of the block together (bg/padding/radius inline). */

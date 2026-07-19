@@ -3,6 +3,7 @@ import { api } from "../api";
 import { usePlayhead } from "../usePlayhead";
 import { buildCues, activeCueIndex } from "../captions";
 import { CaptionBlock } from "./CaptionBlock";
+import { ContextPanel } from "./ContextPanel";
 import { StylePanel } from "./StylePanel";
 import { TranslateBar } from "./TranslateBar";
 import { TranscriptPanel } from "./TranscriptPanel";
@@ -36,7 +37,13 @@ function cropMap(c: Rect): CSSProperties {
   };
 }
 
-export function Editor({ initial }: { initial: Project }) {
+export function Editor({
+  initial,
+  onReprocess,
+}: {
+  initial: Project;
+  onReprocess: (id: string) => void;
+}) {
   const [project, setProject] = useState<Project>(initial);
   const [style, setStyle] = useState<Style>(initial.style);
   const [overlays, setOverlays] = useState<Overlay[]>(initial.overlays);
@@ -45,7 +52,12 @@ export function Editor({ initial }: { initial: Project }) {
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [pendingClipStartId, setPendingClipStartId] = useState<string | null>(null);
   const [previewEnd, setPreviewEnd] = useState<number | null>(null);
+  // Start of the clip currently being previewed (null = free playback). While a
+  // clip preview is running we hide any caption that began before it, so a clip
+  // never opens on the previous segment's leftover subtitle.
+  const [previewStart, setPreviewStart] = useState<number | null>(null);
   const [frame, setFrame] = useState<Frame>(initial.frame);
+  const [whisperPrompt, setWhisperPrompt] = useState<string>(initial.whisper_prompt || "");
   const [sceneCuts, setSceneCuts] = useState<SceneCut[]>(initial.scene_cuts);
   const [selectedSceneId, setSelectedSceneId] = useState<string>("main");
   const [playing, setPlaying] = useState(false);
@@ -69,6 +81,7 @@ export function Editor({ initial }: { initial: Project }) {
   const frameTimer = useRef<number>();
   const cutsTimer = useRef<number>();
   const sceneTimer = useRef<number>();
+  const promptTimer = useRef<number>();
 
   useEffect(() => {
     const v = videoRef.current;
@@ -150,6 +163,7 @@ export function Editor({ initial }: { initial: Project }) {
         e.preventDefault();
         if (v.paused) {
           setPreviewEnd(null);
+          setPreviewStart(null);
           v.play().catch(() => {});
         } else {
           v.pause();
@@ -171,6 +185,7 @@ export function Editor({ initial }: { initial: Project }) {
     if (previewEnd != null && t >= previewEnd) {
       videoRef.current?.pause();
       setPreviewEnd(null);
+      setPreviewStart(null);
     }
   }, [t, previewEnd]);
 
@@ -179,7 +194,13 @@ export function Editor({ initial }: { initial: Project }) {
     [project.segments, style]
   );
   const cueIdx = activeCueIndex(cues, t);
-  const cue = cueIdx >= 0 ? cues[cueIdx] : null;
+  // During a clip preview, hide a caption that began before the clip so it never
+  // opens on the previous segment's leftover subtitle (matches RenderPage).
+  const cue =
+    cueIdx >= 0 &&
+    (previewStart == null || cues[cueIdx].start >= previewStart - 1e-3)
+      ? cues[cueIdx]
+      : null;
   const selectedClip = clips.find((c) => c.id === selectedClipId) || null;
   // Scene shown at the playhead. Query the CLEANED cuts (no self/redundant
   // switches, like the export) shifted by (lead + dur): the CSS crossfade below
@@ -261,6 +282,7 @@ export function Editor({ initial }: { initial: Project }) {
     if (!v) return;
     if (v.paused) {
       setPreviewEnd(null); // don't let a stale clip-preview stop re-pause us
+      setPreviewStart(null);
       v.play().catch(() => {});
     } else {
       v.pause();
@@ -314,6 +336,14 @@ export function Editor({ initial }: { initial: Project }) {
     window.clearTimeout(frameTimer.current);
     frameTimer.current = window.setTimeout(() => {
       api.patchProject(project.id, { frame: next }).catch(() => {});
+    }, 400);
+  }
+
+  function updateContext(next: string) {
+    setWhisperPrompt(next);
+    window.clearTimeout(promptTimer.current);
+    promptTimer.current = window.setTimeout(() => {
+      api.patchProject(project.id, { whisper_prompt: next }).catch(() => {});
     }, 400);
   }
 
@@ -373,6 +403,7 @@ export function Editor({ initial }: { initial: Project }) {
     if (!v) return;
     v.currentTime = clip.start + 0.001;
     setPreviewEnd(clip.end);
+    setPreviewStart(clip.start);
     v.play().catch(() => {});
   }
 
@@ -397,7 +428,8 @@ export function Editor({ initial }: { initial: Project }) {
   // Everything editable is auto-saved (debounced). `flush` forces every pending
   // edit to disk immediately — the export reads the saved project.json, so it
   // must all be persisted before a render starts.
-  const saved = { style, frame, overlays, clips, scenes: project.scenes, scene_cuts: sceneCuts };
+  const saved = { style, frame, overlays, clips, scenes: project.scenes,
+                  scene_cuts: sceneCuts, whisper_prompt: whisperPrompt };
   const savedRef = useRef(saved);
   savedRef.current = saved;
 
@@ -408,7 +440,32 @@ export function Editor({ initial }: { initial: Project }) {
     window.clearTimeout(frameTimer.current);
     window.clearTimeout(cutsTimer.current);
     window.clearTimeout(sceneTimer.current);
+    window.clearTimeout(promptTimer.current);
     await api.patchProject(project.id, savedRef.current);
+  }
+
+  const [reprocessing, setReprocessing] = useState(false);
+  // Re-run whisper on the source video. Replaces every segment + word timing,
+  // so we flush the current style/frame/overlays/clips first (they're preserved)
+  // then hand back to the processing view until it's ready again.
+  async function reprocess() {
+    if (
+      !window.confirm(
+        "Recalculer la transcription ? Les sous-titres actuels (corrections et " +
+          "traductions comprises) seront remplacés. Le style, le cadrage, les " +
+          "clips et les incrustations sont conservés."
+      )
+    )
+      return;
+    setReprocessing(true);
+    try {
+      await flush();
+      await api.retranscribe(project.id);
+      onReprocess(project.id);
+    } catch {
+      setReprocessing(false);
+      window.alert("Impossible de relancer la transcription.");
+    }
   }
 
   // Safety net: persist the latest edits when leaving the editor (navigating
@@ -663,6 +720,13 @@ export function Editor({ initial }: { initial: Project }) {
 
         {tab === "subtitles" && (
           <>
+            <div className="toolbar">
+              <span className="tool-label">Transcription</span>
+              <button className="btn" onClick={reprocess} disabled={reprocessing}>
+                {reprocessing ? "Relance…" : "↻ Recalculer"}
+              </button>
+            </div>
+            <ContextPanel prompt={whisperPrompt} onChange={updateContext} />
             <TranslateBar project={project} onUpdate={setProject} />
             <StylePanel style={style} onChange={updateStyle} />
           </>

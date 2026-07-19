@@ -1,9 +1,119 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { api } from "../api";
 import { isWordActive } from "../captions";
 import { activeSceneId } from "../scenes";
 import { formatTime } from "../time";
 import type { Scene, SceneCut, Segment } from "../types";
+
+// One transcript line. Memoised so that during playback ONLY the line at the
+// playhead re-renders (its `t`/`active` change); every other line keeps stable
+// props and bails out of reconciliation. Without this the whole transcript —
+// hundreds of segments × word spans for a long recording — re-rendered 60×/s,
+// starving the video decoder and making the preview stutter (`conference_complet`).
+type RowProps = {
+  seg: Segment;
+  isLast: boolean;
+  active: boolean;
+  editing: boolean;
+  isStart: boolean;
+  t: number; // live only for the active line, else 0 (so inactive props stay stable)
+  draftText: string; // live only for the editing line, else ""
+  draftTrans: string;
+  busy: boolean;
+  scenes: Scene[];
+  cuts: SceneCut[];
+  onSeek: (to: number) => void;
+  onOpenMenu: (e: ReactMouseEvent, seg: Segment) => void;
+  onStartEdit: (seg: Segment) => void;
+  onCancelEdit: () => void;
+  onDraftText: (v: string) => void;
+  onDraftTrans: (v: string) => void;
+  onSave: (seg: Segment) => void;
+  onSplit: (seg: Segment) => void;
+  onMerge: (seg: Segment) => void;
+  onDelete: (seg: Segment) => void;
+  onSceneCut: (seg: Segment, sceneId: string) => void;
+};
+
+const SegmentRow = memo(function SegmentRow({
+  seg, isLast, active, editing, isStart, t, draftText, draftTrans, busy, scenes, cuts,
+  onSeek, onOpenMenu, onStartEdit, onCancelEdit, onDraftText, onDraftTrans,
+  onSave, onSplit, onMerge, onDelete, onSceneCut,
+}: RowProps) {
+  return (
+    <div
+      data-seg-id={seg.id}
+      className={`seg ${active ? "active" : ""} ${editing ? "editing" : ""} ${isStart ? "clip-start" : ""}`}
+      onContextMenu={(e) => onOpenMenu(e, seg)}
+    >
+      <span className="ts" onClick={() => onSeek(seg.start)}>
+        {formatTime(seg.start)}
+      </span>
+
+      {editing ? (
+        <div className="seg-edit">
+          <textarea value={draftText} onChange={(e) => onDraftText(e.target.value)} rows={2} autoFocus />
+          <input
+            className="trans-input"
+            placeholder="Traduction"
+            value={draftTrans}
+            onChange={(e) => onDraftTrans(e.target.value)}
+          />
+          <div className="seg-actions">
+            <button className="btn sm" disabled={busy} onClick={() => onSave(seg)}>
+              Enregistrer
+            </button>
+            <button className="link" onClick={onCancelEdit}>
+              Annuler
+            </button>
+            <button className="link" disabled={busy || seg.words.length < 2} onClick={() => onSplit(seg)}>
+              ✂ Diviser
+            </button>
+            <button className="link" disabled={busy || isLast} onClick={() => onMerge(seg)}>
+              ⤵ Fusionner
+            </button>
+            <button className="link danger" disabled={busy} onClick={() => onDelete(seg)}>
+              🗑 Supprimer
+            </button>
+          </div>
+        </div>
+      ) : (
+        <span
+          className="seg-text"
+          title="Clic : aller à ce passage · double-clic : corriger"
+          onClick={() => onSeek(seg.start)}
+          onDoubleClick={() => onStartEdit(seg)}
+        >
+          {seg.words.length > 0
+            ? seg.words.map((w, j) => (
+                <span key={j} className={active && isWordActive(w, t) ? "word on" : "word"}>
+                  {w.text}{" "}
+                </span>
+              ))
+            : seg.text}
+          {seg.translation && <span className="seg-trans"> — {seg.translation}</span>}
+        </span>
+      )}
+      {!editing && scenes.length > 1 && (
+        <div className="seg-scenes" title="Scène affichée à partir d'ici">
+          {scenes.map((sc) => {
+            const on = activeSceneId(cuts, seg.start) === sc.id;
+            return (
+              <button
+                key={sc.id}
+                className={`scene-dot ${on ? "on" : ""}`}
+                style={{ backgroundColor: on ? sc.color : "transparent", borderColor: sc.color }}
+                title={sc.name}
+                onClick={(e) => { e.stopPropagation(); onSceneCut(seg, sc.id); }}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+});
 
 export function TranscriptPanel({
   projectId,
@@ -40,7 +150,17 @@ export function TranscriptPanel({
   const [busy, setBusy] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number; seg: Segment } | null>(null);
   const [query, setQuery] = useState("");
-  const activeRef = useRef<HTMLDivElement>(null);
+  const segsRef = useRef<HTMLDivElement>(null);
+
+  // Refs holding the latest live values, so the row-facing callbacks below stay
+  // referentially STABLE (empty deps) even though Editor recreates onSeek/reload/
+  // … every frame — otherwise SegmentRow's memo would never bail.
+  const tRef = useRef(t); tRef.current = t;
+  const draftRef = useRef({ text: draftText, trans: draftTrans });
+  draftRef.current = { text: draftText, trans: draftTrans };
+  const onSeekRef = useRef(onSeek); onSeekRef.current = onSeek;
+  const onSceneCutRef = useRef(onSceneCut); onSceneCutRef.current = onSceneCut;
+  const reloadRef = useRef(reload); reloadRef.current = reload;
 
   useEffect(() => {
     if (!menu) return;
@@ -56,46 +176,64 @@ export function TranscriptPanel({
       )
     : segments;
   const activeId = segments.find((s) => t >= s.start && t < s.end)?.id ?? null;
+  const lastId = segments.length ? segments[segments.length - 1].id : null;
 
   // Auto-follow: keep the line at the playhead visible while playing (only when
-  // not searching, so it doesn't fight the user browsing results).
+  // not searching, so it doesn't fight the user browsing results). Query the DOM
+  // by id instead of a ref, so rows don't need a per-row ref prop.
   useEffect(() => {
-    if (!follow || q) return;
-    activeRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    if (!follow || q || !activeId) return;
+    segsRef.current
+      ?.querySelector(`[data-seg-id="${activeId}"]`)
+      ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [activeId, follow, q]);
 
-  function startEdit(seg: Segment) {
+  const seekStable = useCallback((to: number) => onSeekRef.current(to), []);
+  const sceneCutStable = useCallback((seg: Segment, sceneId: string) => onSceneCutRef.current(seg, sceneId), []);
+  const openMenu = useCallback((e: ReactMouseEvent, seg: Segment) => {
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY, seg });
+  }, []);
+  const startEdit = useCallback((seg: Segment) => {
     setEditingId(seg.id);
     setDraftText(seg.text);
     setDraftTrans(seg.translation);
-  }
+  }, []);
+  const cancelEdit = useCallback(() => setEditingId(null), []);
 
-  async function run(fn: () => Promise<unknown>) {
+  const run = useCallback(async (fn: () => Promise<unknown>) => {
     setBusy(true);
     try {
       await fn();
-      await reload();
+      await reloadRef.current();
     } finally {
       setBusy(false);
     }
-  }
+  }, []);
 
-  async function save(seg: Segment) {
-    await run(() =>
-      api.patchSegment(projectId, seg.id, { text: draftText, translation: draftTrans })
-    );
-    setEditingId(null);
-  }
+  const onSave = useCallback((seg: Segment) => {
+    run(() =>
+      api.patchSegment(projectId, seg.id, {
+        text: draftRef.current.text,
+        translation: draftRef.current.trans,
+      })
+    ).then(() => setEditingId(null));
+  }, [run, projectId]);
 
-  // Split at the word boundary nearest the playhead (else the middle).
-  function splitIndex(seg: Segment): number {
-    if (seg.words.length < 2) return 0;
-    if (t > seg.start && t < seg.end) {
-      const idx = seg.words.filter((w) => w.start <= t).length;
-      return Math.min(Math.max(idx, 1), seg.words.length - 1);
-    }
-    return Math.floor(seg.words.length / 2);
-  }
+  const onSplit = useCallback((seg: Segment) => {
+    // Split at the word boundary nearest the playhead (else the middle).
+    const tt = tRef.current;
+    let idx: number;
+    if (seg.words.length < 2) idx = 0;
+    else if (tt > seg.start && tt < seg.end) {
+      idx = seg.words.filter((w) => w.start <= tt).length;
+      idx = Math.min(Math.max(idx, 1), seg.words.length - 1);
+    } else idx = Math.floor(seg.words.length / 2);
+    run(() => api.splitSegment(projectId, seg.id, idx));
+  }, [run, projectId]);
+
+  const onMerge = useCallback((seg: Segment) => run(() => api.mergeSegment(projectId, seg.id)), [run, projectId]);
+  const onDelete = useCallback((seg: Segment) => run(() => api.deleteSegment(projectId, seg.id)), [run, projectId]);
 
   return (
     <div className="transcript">
@@ -115,104 +253,36 @@ export function TranscriptPanel({
           {q ? ` · ${shown.length} résultat${shown.length > 1 ? "s" : ""}` : ""}
         </p>
       </div>
-      <div className="segments">
+      <div className="segments" ref={segsRef}>
         {shown.map((s) => {
-          const i = segments.indexOf(s);
-          const active = t >= s.start && t < s.end;
+          const active = s.id === activeId;
           const editing = editingId === s.id;
-          const isStart = s.id === pendingClipStartId;
           return (
-            <div
+            <SegmentRow
               key={s.id}
-              ref={active ? activeRef : undefined}
-              className={`seg ${active ? "active" : ""} ${editing ? "editing" : ""} ${isStart ? "clip-start" : ""}`}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                setMenu({ x: e.clientX, y: e.clientY, seg: s });
-              }}
-            >
-              <span className="ts" onClick={() => onSeek(s.start)}>
-                {formatTime(s.start)}
-              </span>
-
-              {editing ? (
-                <div className="seg-edit">
-                  <textarea
-                    value={draftText}
-                    onChange={(e) => setDraftText(e.target.value)}
-                    rows={2}
-                    autoFocus
-                  />
-                  <input
-                    className="trans-input"
-                    placeholder="Traduction"
-                    value={draftTrans}
-                    onChange={(e) => setDraftTrans(e.target.value)}
-                  />
-                  <div className="seg-actions">
-                    <button className="btn sm" disabled={busy} onClick={() => save(s)}>
-                      Enregistrer
-                    </button>
-                    <button className="link" onClick={() => setEditingId(null)}>
-                      Annuler
-                    </button>
-                    <button
-                      className="link"
-                      disabled={busy || s.words.length < 2}
-                      onClick={() => run(() => api.splitSegment(projectId, s.id, splitIndex(s)))}
-                    >
-                      ✂ Diviser
-                    </button>
-                    <button
-                      className="link"
-                      disabled={busy || i === segments.length - 1}
-                      onClick={() => run(() => api.mergeSegment(projectId, s.id))}
-                    >
-                      ⤵ Fusionner
-                    </button>
-                    <button
-                      className="link danger"
-                      disabled={busy}
-                      onClick={() => run(() => api.deleteSegment(projectId, s.id))}
-                    >
-                      🗑 Supprimer
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <span
-                  className="seg-text"
-                  title="Clic : aller à ce passage · double-clic : corriger"
-                  onClick={() => onSeek(s.start)}
-                  onDoubleClick={() => startEdit(s)}
-                >
-                  {s.words.length > 0
-                    ? s.words.map((w, j) => (
-                        <span key={j} className={active && isWordActive(w, t) ? "word on" : "word"}>
-                          {w.text}{" "}
-                        </span>
-                      ))
-                    : s.text}
-                  {s.translation && <span className="seg-trans"> — {s.translation}</span>}
-                </span>
-              )}
-              {!editing && scenes.length > 1 && (
-                <div className="seg-scenes" title="Scène affichée à partir d'ici">
-                  {scenes.map((sc) => {
-                    const on = activeSceneId(cuts, s.start) === sc.id;
-                    return (
-                      <button
-                        key={sc.id}
-                        className={`scene-dot ${on ? "on" : ""}`}
-                        style={{ backgroundColor: on ? sc.color : "transparent", borderColor: sc.color }}
-                        title={sc.name}
-                        onClick={(e) => { e.stopPropagation(); onSceneCut(s, sc.id); }}
-                      />
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+              seg={s}
+              isLast={s.id === lastId}
+              active={active}
+              editing={editing}
+              isStart={s.id === pendingClipStartId}
+              t={active ? t : 0}
+              draftText={editing ? draftText : ""}
+              draftTrans={editing ? draftTrans : ""}
+              busy={editing ? busy : false}
+              scenes={scenes}
+              cuts={cuts}
+              onSeek={seekStable}
+              onOpenMenu={openMenu}
+              onStartEdit={startEdit}
+              onCancelEdit={cancelEdit}
+              onDraftText={setDraftText}
+              onDraftTrans={setDraftTrans}
+              onSave={onSave}
+              onSplit={onSplit}
+              onMerge={onMerge}
+              onDelete={onDelete}
+              onSceneCut={sceneCutStable}
+            />
           );
         })}
       </div>

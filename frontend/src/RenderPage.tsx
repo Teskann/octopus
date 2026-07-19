@@ -112,7 +112,12 @@ function RenderStage({ project, clip }: { project: Project; clip: { start: numbe
   );
 
   const cueIdx = activeCueIndex(cues, t);
-  const cue = cueIdx >= 0 ? cues[cueIdx] : null;
+  // Never show a caption that *began before the clip* — a cue ongoing at
+  // clip.start (or one held into the gap by the glue in buildCues) would
+  // otherwise bleed the previous segment's subtitle over the clip's first
+  // frames. Clips start clean.
+  const cue =
+    cueIdx >= 0 && cues[cueIdx].start >= clip.start - 1e-3 ? cues[cueIdx] : null;
 
   // Seek EVERY mounted video to `time`, then resolve once they've reported
   // `seeked` and the page has painted (two rAFs). Two subtleties fixed here:
