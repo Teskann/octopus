@@ -220,3 +220,12 @@ def delete_project(project_id: str) -> bool:
 
 def source_path(project: dict) -> Path:
     return project_dir(project["id"]) / project["source_video"]
+
+
+def scene_path(project: dict, scene_id: str) -> Path | None:
+    """Absolute path to a scene's video file (the main scene resolves to the
+    source video). None if the scene id is unknown."""
+    for scene in project.get("scenes", []):
+        if scene["id"] == scene_id:
+            return project_dir(project["id"]) / scene["filename"]
+    return None

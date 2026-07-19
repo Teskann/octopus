@@ -185,15 +185,27 @@ crop `frame.x/y/w/h`) is the **output window** and holds the captions.
 
 ## Gotchas & lessons (read before editing)
 
-- **The playhead `t` ticks at 60fps — never let a big subtree re-render on it.**
-  `usePlayhead` re-renders `Editor` (and children) every frame; nothing is
-  `React.memo`'d by default. Passing live `t` into a large list (the transcript
-  is hundreds of segments × word spans) reconciled it 60×/s, starving the video
-  decoder → **the preview stuttered while the export was perfectly synced** (the
-  giveaway that it's a main-thread cost, not an A/V-sync bug). Fix pattern
-  (`TranscriptPanel.tsx`): memoise the row, feed live `t` ONLY to the active row
-  (others get a constant so their props stay stable), and stabilise every
-  callback (wrap Editor's per-render `seek`/`reload`/… in refs) so the memo bails.
+- **The playhead `t` drives a full-editor re-render — keep the per-tick cost low.**
+  `usePlayhead` re-renders `Editor` (and children) on every update; nothing is
+  `React.memo`'d by default. At 60fps this saturated the main thread and starved
+  BOTH the video decoder and the rAF loop → **preview stutter / slow-motion / a
+  frozen timeline (`t` stops advancing), while the export stayed perfectly synced**
+  (the giveaway that it's a main-thread cost, not an A/V-sync bug). Two-part fix:
+  (1) `usePlayhead` **throttles the play loop to ~30Hz** (`MIN_DT`) — smooth for
+  captions/marker at half the load; don't restore 60fps. (2) `TranscriptPanel.tsx`
+  memoises each row, feeds live `t` ONLY to the active row (others get a constant
+  so props stay stable), and stabilises every callback (wrap Editor's per-render
+  `seek`/`reload`/… in refs) so the memo bails. Apply the same pattern before
+  adding any new large `t`-driven list.
+- **Don't eagerly `preload` secondary scene videos — they starve the base video.**
+  Opening a project with B-roll loaded the base (audio master) AND every scene at
+  once; a large scene (e.g. 648 MB) hogged the bandwidth so the base buffered
+  slowly — the fit-mode picture (a muted scene copy) played while the SOUND only
+  arrived ~1 min later. `SceneStage` now `preload`s only the active scene + the
+  main (`preload={active || scene.is_main ? "auto" : "metadata"}`); inactive
+  secondaries load when they go active. (Sources are already `+faststart`, and
+  imports run `media.faststart_remux` — so a missing-moov source is NOT usually
+  the cause of "plays muted then audio catches up"; look at load contention.)
 - **The user co-develops this repo between turns.** Prefer `Edit` over `Write`;
   re-`Read` a file right before changing it; if content contradicts your memory,
   surface it. (A `Write` once clobbered a hand-edited file.) See memory

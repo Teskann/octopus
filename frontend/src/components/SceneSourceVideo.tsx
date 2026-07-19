@@ -34,7 +34,15 @@ export function SceneSourceVideo({
     if (!v) return;
     const onLoad = () => { try { v.currentTime = tRef.current; } catch { /* ignore */ } };
     v.addEventListener("loadeddata", onLoad);
-    return () => v.removeEventListener("loadeddata", onLoad);
+    return () => {
+      v.removeEventListener("loadeddata", onLoad);
+      // Release the decoder only on a REAL unmount (see Editor) — the isConnected
+      // check avoids stripping src during React StrictMode's dev remount.
+      setTimeout(() => {
+        if (v.isConnected) return;
+        try { v.pause(); v.removeAttribute("src"); v.load(); } catch { /* ignore */ }
+      }, 0);
+    };
   }, []);
 
   return (

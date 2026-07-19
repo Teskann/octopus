@@ -61,6 +61,11 @@ export function Editor({
   const [sceneCuts, setSceneCuts] = useState<SceneCut[]>(initial.scene_cuts);
   const [selectedSceneId, setSelectedSceneId] = useState<string>("main");
   const [playing, setPlaying] = useState(false);
+  // True while the base video can't play yet (initial load or buffering), so the
+  // UI can show a spinner instead of looking silently frozen.
+  const [buffering, setBuffering] = useState(true);
+  // The user pressed play while the video wasn't ready — start as soon as it is.
+  const wantPlay = useRef(false);
   // Set when the project changed on disk from OUTSIDE this editor (e.g. an MCP
   // agent), so we can offer a reload instead of silently diverging.
   const [externalChange, setExternalChange] = useState(false);
@@ -151,6 +156,59 @@ export function Editor({
     return () => v.removeEventListener("loadeddata", kick);
   }, []);
 
+  // Buffering / readiness. Opening a project loads the base video (plus every
+  // scene video), so pressing play can't start until enough has buffered — which
+  // looked like a silent freeze. Track that state to show a spinner, AND honour a
+  // pending play intent the moment the video becomes playable (so "press play
+  // while it loads" reliably starts instead of swallowing a rejected play()).
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const busy = () => setBuffering(true);
+    const ready = () => {
+      setBuffering(false);
+      if (wantPlay.current && v.paused) v.play().catch(() => {});
+    };
+    v.addEventListener("loadstart", busy);
+    v.addEventListener("waiting", busy);
+    v.addEventListener("stalled", busy);
+    v.addEventListener("canplay", ready);
+    v.addEventListener("canplaythrough", ready);
+    v.addEventListener("playing", ready);
+    v.addEventListener("seeked", ready);
+    if (v.readyState >= 3) setBuffering(false);
+    return () => {
+      v.removeEventListener("loadstart", busy);
+      v.removeEventListener("waiting", busy);
+      v.removeEventListener("stalled", busy);
+      v.removeEventListener("canplay", ready);
+      v.removeEventListener("canplaythrough", ready);
+      v.removeEventListener("playing", ready);
+      v.removeEventListener("seeked", ready);
+    };
+  }, []);
+
+  // Release the base video's decoder when leaving the editor. React only removes
+  // the <video> from the DOM on unmount; the browser keeps the (hardware) decoder
+  // alive until GC, so opening a SECOND project stacked more decoders on top of
+  // the first and exhausted the GPU's limited pool — the player worked for the
+  // first project of a session but broke on every one opened afterwards (only a
+  // full page reload fixed it). Tearing the element down frees the decoder now.
+  useEffect(() => {
+    const v = videoRef.current;
+    return () => {
+      if (!v) return;
+      // Only tear down on a REAL unmount. React StrictMode (dev) fake-unmounts on
+      // mount; stripping src there left the video permanently black. Defer, then
+      // release only if the node is actually detached from the DOM (a genuine
+      // navigation away), never on the StrictMode remount.
+      setTimeout(() => {
+        if (v.isConnected) return;
+        try { v.pause(); v.removeAttribute("src"); v.load(); } catch { /* ignore */ }
+      }, 0);
+    };
+  }, []);
+
   // Keyboard: Space = play/pause (never scroll the page), ←/→ = seek 5s.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -164,8 +222,10 @@ export function Editor({
         if (v.paused) {
           setPreviewEnd(null);
           setPreviewStart(null);
+          wantPlay.current = true;
           v.play().catch(() => {});
         } else {
+          wantPlay.current = false;
           v.pause();
         }
       } else if (e.code === "ArrowLeft") {
@@ -283,8 +343,10 @@ export function Editor({
     if (v.paused) {
       setPreviewEnd(null); // don't let a stale clip-preview stop re-pause us
       setPreviewStart(null);
+      wantPlay.current = true; // if not ready yet, the buffering effect starts it
       v.play().catch(() => {});
     } else {
+      wantPlay.current = false;
       v.pause();
     }
   }
@@ -676,9 +738,17 @@ export function Editor({
               )}
             </div>
           </div>
+          {buffering && (
+            <div className="video-loading">
+              <span className="spinner" />
+              <span>Chargement…</span>
+            </div>
+          )}
         </div>
         <div className="stage-controls">
-          <button className="btn sm" onClick={togglePlay}>{playing ? "⏸ Pause" : "▶ Lecture"}</button>
+          <button className="btn sm" onClick={togglePlay}>
+            {playing ? "⏸ Pause" : buffering ? "⏳ Chargement…" : "▶ Lecture"}
+          </button>
           <span className="muted small">{formatTime(t)} / {formatTime(project.duration)}</span>
         </div>
         <Timeline

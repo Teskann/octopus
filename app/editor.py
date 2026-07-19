@@ -77,18 +77,37 @@ def get_project(project_id: str) -> dict:
 
 
 @router.get("/{project_id}/transcript")
-def get_transcript(project_id: str) -> list[dict]:
+def get_transcript(project_id: str, q: str = "", start: float | None = None,
+                   end: float | None = None, offset: int = 0,
+                   limit: int | None = None) -> list[dict]:
     """Compact, token-cheap view of the transcript: one row per segment with its
     id, timecodes, text and translation (no per-word timings). An agent reasons
-    over this to pick clip boundaries; word-level timings stay in GET /{id}."""
+    over this to pick clip boundaries; word-level timings stay in GET /{id}.
+
+    Optional filters keep the payload small on long talks: `q` = case-insensitive
+    substring search over text+translation; `start`/`end` = keep segments
+    overlapping that time window; `offset`/`limit` = paginate."""
     project = store.get(project_id)
     if project is None:
         raise HTTPException(404, "Unknown project")
-    return [
+    rows = [
         {"id": s["id"], "start": s["start"], "end": s["end"],
          "text": s["text"], "translation": s.get("translation", "")}
         for s in project["segments"]
     ]
+    if q:
+        ql = q.lower()
+        rows = [r for r in rows
+                if ql in r["text"].lower() or ql in (r["translation"] or "").lower()]
+    if start is not None:
+        rows = [r for r in rows if r["end"] > start]
+    if end is not None:
+        rows = [r for r in rows if r["start"] < end]
+    if offset:
+        rows = rows[max(offset, 0):]
+    if limit is not None:
+        rows = rows[:max(limit, 0)]
+    return rows
 
 
 @router.delete("/{project_id}")
@@ -108,6 +127,46 @@ def patch_project(project_id: str, patch: dict) -> dict:
     if project is None:
         raise HTTPException(404, "Unknown project")
     return project
+
+
+@router.get("/{project_id}/segments/{segment_id}")
+def get_segment(project_id: str, segment_id: str) -> dict:
+    """One segment with its per-word timings — the cheap way to read word
+    boundaries for a clean clip cut without pulling the whole project."""
+    project = store.get(project_id)
+    if project is None:
+        raise HTTPException(404, "Unknown project")
+    seg = next((s for s in project["segments"] if s["id"] == segment_id), None)
+    if seg is None:
+        raise HTTPException(404, "Unknown segment")
+    return seg
+
+
+@router.post("/{project_id}/segments/batch")
+def batch_edit_segments(project_id: str, body: dict) -> dict:
+    """Apply many segment edits in a single write. `body.edits` is a list of
+    {id, text?, translation?, start?, end?}; per-word timings are recomputed for
+    any edit that changes `text`. Returns {updated:[...], missing:[ids]}."""
+    project = store.get(project_id)
+    if project is None:
+        raise HTTPException(404, "Unknown project")
+    by_id = {s["id"]: s for s in project["segments"]}
+    updated: list[dict] = []
+    missing: list[str] = []
+    for edit in body.get("edits", []):
+        seg = by_id.get(edit.get("id"))
+        if seg is None:
+            missing.append(edit.get("id"))
+            continue
+        if edit.get("text") is not None:
+            segment_ops.set_segment_text(seg, edit["text"])
+        for key in ("translation", "start", "end"):
+            if edit.get(key) is not None:
+                seg[key] = edit[key]
+        updated.append(seg)
+    if updated:
+        store.save(project)
+    return {"updated": updated, "missing": missing}
 
 
 @router.patch("/{project_id}/segments/{segment_id}")
@@ -209,6 +268,30 @@ def get_subtitles(project_id: str) -> str:
     return subtitles.build_ass(project, width, height)
 
 
+@router.get("/{project_id}/scenes")
+def list_scenes(project_id: str) -> list[dict]:
+    """Scenes (camera angles / B-roll) with each file's `duration` and
+    `has_audio`, probed once and cached. Surfaces hard limits — e.g. a secondary
+    camera shorter than the talk can only be shown up to its own duration."""
+    project = store.get(project_id)
+    if project is None:
+        raise HTTPException(404, "Unknown project")
+    changed = False
+    for sc in project.get("scenes", []):
+        if "duration" not in sc or "has_audio" not in sc:
+            path = store.project_dir(project_id) / sc["filename"]
+            if path.exists():
+                try:
+                    sc["duration"] = round(media.probe_video(path).duration, 3)
+                except media.MediaError:
+                    sc["duration"] = 0.0
+                sc["has_audio"] = media.has_audio(path)
+                changed = True
+    if changed:
+        store.save(project)
+    return project.get("scenes", [])
+
+
 @router.post("/{project_id}/scenes")
 async def add_scene(project_id: str, file: UploadFile = File(...)) -> dict:
     """Upload an extra (muted) point-of-view video, synchronized with the main."""
@@ -222,6 +305,7 @@ async def add_scene(project_id: str, file: UploadFile = File(...)) -> dict:
     with dest.open("wb") as fh:
         while chunk := await file.read(1 << 20):
             fh.write(chunk)
+    media.faststart_remux(dest)  # stream-friendly moov, like the source
     try:
         info = media.probe_video(dest)
         w, h = info.width, info.height
@@ -283,13 +367,14 @@ def get_video(project_id: str) -> FileResponse:
 
 @router.get("/{project_id}/frame")
 def get_frame(project_id: str, t: float, width: int = 480,
-              mode: str = "source") -> Response:
+              mode: str = "source", scene: str = "main") -> Response:
     """A single JPEG of the video at time `t` (seconds) — the agent's "eyes".
 
-    mode="source" (default): the raw source frame, grabbed by ffmpeg — fast, no
-    browser needed, good for understanding *content*. mode="preview": the fully
-    composed output frame (captions + reframe + scenes) captured from the same
-    headless renderer as export — shows what the final clip will look like."""
+    mode="source" (default): the raw frame of scene `scene` (default the main
+    video), grabbed by ffmpeg — fast, no browser, good for understanding
+    *content*; use `scene` to peek at a secondary camera / B-roll angle.
+    mode="preview": the fully composed output frame (captions + reframe + scenes)
+    captured from the same headless renderer as export — `scene` is ignored."""
     project = store.get(project_id)
     if project is None:
         raise HTTPException(404, "Unknown project")
@@ -301,12 +386,14 @@ def get_frame(project_id: str, t: float, width: int = 480,
             raise HTTPException(500, str(exc))
         return Response(content=data, media_type="image/jpeg")
 
-    source = store.source_path(project)
-    if not source.exists():
+    path = store.scene_path(project, scene)
+    if path is None:
+        raise HTTPException(404, f"Unknown scene: {scene}")
+    if not path.exists():
         raise HTTPException(404, "Video missing")
     proc = subprocess.run(
         ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-         "-ss", f"{max(t, 0.0):.3f}", "-i", str(source),
+         "-ss", f"{max(t, 0.0):.3f}", "-i", str(path),
          "-frames:v", "1", "-vf", f"scale={max(16, width)}:-2",
          "-c:v", "mjpeg", "-f", "image2", "pipe:1"],
         capture_output=True,
@@ -314,6 +401,28 @@ def get_frame(project_id: str, t: float, width: int = 480,
     if proc.returncode != 0 or not proc.stdout:
         raise HTTPException(500, proc.stderr.decode("utf-8", "replace")[-400:])
     return Response(content=proc.stdout, media_type="image/jpeg")
+
+
+@router.get("/{project_id}/scene-changes")
+def scene_changes(project_id: str, scene: str = "main", threshold: float = 0.4,
+                  crop: str = "", start: float | None = None,
+                  end: float | None = None) -> list[dict]:
+    """Detect big picture changes in a scene's video — slide / shot transitions.
+    Returns [{t, score}]. `threshold` 0..1 (lower = more sensitive). `crop` is an
+    ffmpeg crop expr "w:h:x:y" to ignore a region (e.g. a moving webcam inset).
+    `start`/`end` limit the scanned range."""
+    project = store.get(project_id)
+    if project is None:
+        raise HTTPException(404, "Unknown project")
+    path = store.scene_path(project, scene)
+    if path is None:
+        raise HTTPException(404, f"Unknown scene: {scene}")
+    if not path.exists():
+        raise HTTPException(404, "Video missing")
+    try:
+        return media.detect_scene_changes(path, threshold, crop or None, start, end)
+    except media.MediaError as exc:
+        raise HTTPException(500, str(exc))
 
 
 # --- clip export / render ---------------------------------------------------

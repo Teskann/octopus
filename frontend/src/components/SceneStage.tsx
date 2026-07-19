@@ -35,7 +35,7 @@ export function SceneStage({
 
   // Only the active scene follows the playhead + play state. The muted scene
   // plays freely at ~1×; we bias its playbackRate PROPORTIONALLY to the drift so
-  // it eases back to zero — the further behind, the faster it runs (up to 2×),
+  // it eases back to zero — the further behind, the faster it runs (up to 1.5×),
   // converging in ~1s with no backward jump or flicker. A hard seek is used ONLY
   // for a genuine timeline jump (drift > 1.5s), and NEVER while the element is
   // already seeking: re-issuing `currentTime = t` at 60fps is what wedged the
@@ -56,13 +56,18 @@ export function SceneStage({
         v.pause();
         continue;
       }
+      let rate = 1;
       if (Math.abs(drift) > 1.5) {
         if (!v.seeking) { try { v.currentTime = t; } catch { /* ignore */ } }
-        v.playbackRate = 1;
-      } else {
-        // Proportional catch-up: rate 1 at zero drift, clamped to [0.5×, 2×].
-        v.playbackRate = Math.min(2, Math.max(0.5, 1 - drift * 2));
+      } else if (Math.abs(drift) > 0.08) {
+        // Proportional catch-up, clamped [0.6×, 1.5×]. A dead zone below 0.08s
+        // keeps it at exactly 1× when in sync — no rate churn, and no accidental
+        // slow-motion if the playhead momentarily stalls.
+        rate = Math.min(1.5, Math.max(0.6, 1 - drift * 1.5));
       }
+      // Only write playbackRate when it actually changed — reassigning it every
+      // tick needlessly disturbs the decoder.
+      if (Math.abs(v.playbackRate - rate) > 0.02) v.playbackRate = rate;
       if (v.paused) v.play().catch(() => {});
     }
   }, [active, t, playing]);
@@ -90,6 +95,23 @@ export function SceneStage({
     return () => list.forEach((v) => v.removeEventListener("loadeddata", onLoad));
   }, []);
 
+  // Free each scene video's decoder on unmount (see Editor's base video) — else
+  // the GPU's limited decoder pool fills up as you open successive projects and
+  // playback breaks until a full reload.
+  useEffect(() => {
+    const list = vids();
+    return () => {
+      // Only on a REAL unmount — not React StrictMode's dev fake-unmount, which
+      // would strip src on mount and leave a black scene. Defer + check isConnected.
+      setTimeout(() => {
+        list.forEach((v) => {
+          if (v.isConnected) return;
+          try { v.pause(); v.removeAttribute("src"); v.load(); } catch { /* ignore */ }
+        });
+      }, 0);
+    };
+  }, []);
+
   const src = api.sceneVideoUrl(projectId, scene.id);
   const cropStyle: CSSProperties = {
     position: "absolute",
@@ -102,15 +124,23 @@ export function SceneStage({
     objectFit: "fill",
   };
 
+  // Defer downloading a secondary scene until it's actually shown. Eagerly
+  // preloading every scene made a big B-roll file (e.g. 648 MB) hog the bandwidth
+  // and STARVE the audio-carrying base video on open — the picture (a muted scene
+  // copy) played but sound only arrived ~1 min later once the base finally
+  // buffered. The active scene and the main (its fit picture shows immediately)
+  // still preload; inactive secondaries fetch only metadata until they go active.
+  const pre = active || scene.is_main ? "auto" : "metadata";
+
   return (
     <div className={`scene-overlay ${active ? "active" : ""}`}>
       {mode === "fit" ? (
         <>
-          <video ref={bgRef} className="scene-bg" src={src} muted playsInline preload="auto" />
-          <video ref={fgRef} className="scene-fg" src={src} muted playsInline preload="auto" />
+          <video ref={bgRef} className="scene-bg" src={src} muted playsInline preload={pre} />
+          <video ref={fgRef} className="scene-fg" src={src} muted playsInline preload={pre} />
         </>
       ) : (
-        <video ref={fgRef} className="scene-crop" style={cropStyle} src={src} muted playsInline preload="auto" />
+        <video ref={fgRef} className="scene-crop" style={cropStyle} src={src} muted playsInline preload={pre} />
       )}
     </div>
   );

@@ -58,21 +58,65 @@ def get_project(project_id: str) -> dict:
 
 
 @mcp.tool()
-def get_transcript(project_id: str) -> list[dict]:
+def get_transcript(project_id: str, q: str = "", start: float | None = None,
+                   end: float | None = None, offset: int = 0,
+                   limit: int | None = None) -> list[dict]:
     """Compact transcript: one row per segment {id, start, end, text, translation}.
-    Cheap to read; reason over this to pick the most impactful sequences."""
-    return _call("GET", f"/api/projects/{project_id}/transcript").json()
+    Cheap to read; reason over this to pick the most impactful sequences. On long
+    talks, filter to keep it small: `q` = case-insensitive substring search over
+    text+translation; `start`/`end` = only segments overlapping that time window;
+    `offset`/`limit` = paginate."""
+    params: dict[str, Any] = {"q": q, "offset": offset}
+    if start is not None:
+        params["start"] = start
+    if end is not None:
+        params["end"] = end
+    if limit is not None:
+        params["limit"] = limit
+    return _call("GET", f"/api/projects/{project_id}/transcript", params=params).json()
+
+
+@mcp.tool()
+def search_transcript(project_id: str, query: str, limit: int = 50) -> list[dict]:
+    """Find every segment whose text or translation contains `query`
+    (case-insensitive). Returns [{id, start, end, text, translation}] — the fast
+    way to locate a term/typo across the whole talk without dumping it all."""
+    return _call("GET", f"/api/projects/{project_id}/transcript",
+                 params={"q": query, "limit": limit}).json()
+
+
+@mcp.tool()
+def get_segment(project_id: str, segment_id: str) -> dict:
+    """One segment with its per-word timings (words[]) — the cheap way to read
+    exact word boundaries for a clean clip cut, without pulling get_project."""
+    return _call("GET", f"/api/projects/{project_id}/segments/{segment_id}").json()
 
 
 @mcp.tool()
 def get_frame(project_id: str, t: float, width: int = 480,
-             mode: str = "source") -> Image:
+             mode: str = "source", scene: str = "main") -> Image:
     """See the video at time `t` (seconds). mode="source" = raw frame (fast,
     understand content); mode="preview" = the composed output (captions + reframe
-    + scenes, needs Chrome/Vite like export). `width` applies to source mode."""
+    + scenes, needs Chrome/Vite like export). `width` applies to source mode.
+    `scene` (source mode) screenshots a specific camera/B-roll angle — id from
+    list_scenes, "main" = the primary video."""
     r = _call("GET", f"/api/projects/{project_id}/frame",
-              params={"t": t, "width": width, "mode": mode})
+              params={"t": t, "width": width, "mode": mode, "scene": scene})
     return Image(data=r.content, format="jpeg")
+
+
+@mcp.tool()
+def get_frames(project_id: str, times: list[float], width: int = 480,
+               mode: str = "source", scene: str = "main") -> list[Image]:
+    """Screenshot several timestamps at once (one round-trip instead of N). Images
+    come back in the same order as `times`. Ideal for locating slide/shot
+    transitions or scanning a scene. Same `mode`/`scene` semantics as get_frame."""
+    frames: list[Image] = []
+    for t in times:
+        r = _call("GET", f"/api/projects/{project_id}/frame",
+                  params={"t": t, "width": width, "mode": mode, "scene": scene})
+        frames.append(Image(data=r.content, format="jpeg"))
+    return frames
 
 
 # --- subtitles / segments ---------------------------------------------------
@@ -89,6 +133,26 @@ def edit_segment(project_id: str, segment_id: str, text: str | None = None,
         raise RuntimeError("Rien à modifier : passez text, translation, start ou end.")
     return _call("PATCH", f"/api/projects/{project_id}/segments/{segment_id}",
                  json=patch).json()
+
+
+@mcp.tool()
+def batch_edit_segments(project_id: str, edits: list[dict]) -> dict:
+    """Fix many subtitles in ONE call — far faster than editing them one by one.
+    `edits` is a list of {segment_id, text?, translation?, start?, end?}; per-word
+    timings are recomputed for any edit that changes `text`. Returns
+    {updated:[...], missing:[ids that didn't exist]}."""
+    payload = []
+    for e in edits:
+        sid = e.get("segment_id") or e.get("id")
+        if not sid:
+            raise RuntimeError("Chaque édition doit avoir un segment_id.")
+        item = {"id": sid}
+        for k in ("text", "translation", "start", "end"):
+            if e.get(k) is not None:
+                item[k] = e[k]
+        payload.append(item)
+    return _call("POST", f"/api/projects/{project_id}/segments/batch",
+                 json={"edits": payload}).json()
 
 
 @mcp.tool()
@@ -217,6 +281,23 @@ def delete_clip(project_id: str, clip_id: str) -> list[dict]:
     return clips
 
 
+@mcp.tool()
+def set_clips(project_id: str, clips: list[dict]) -> list[dict]:
+    """Replace the ENTIRE clip list in one atomic write — the fast way to lay down
+    (or re-plan) many clips at once. Each item is {name?, start, end, id?}; ids
+    are generated when omitted, kept when given (so you can update in place).
+    Returns the saved clips."""
+    out: list[dict] = []
+    for c in clips:
+        if c.get("end") is None or c.get("start") is None or c["end"] <= c["start"]:
+            raise RuntimeError(f"Clip invalide (start<end requis): {c}")
+        out.append({"id": c.get("id") or _uid("clip-"),
+                    "name": c.get("name", "Clip"),
+                    "start": float(c["start"]), "end": float(c["end"])})
+    _patch(project_id, {"clips": out})
+    return out
+
+
 # --- style / presets --------------------------------------------------------
 @mcp.tool()
 def get_style(project_id: str) -> dict:
@@ -281,8 +362,28 @@ def set_frame(project_id: str, aspect: str | None = None, x: float | None = None
 # --- scenes / B-roll --------------------------------------------------------
 @mcp.tool()
 def list_scenes(project_id: str) -> list[dict]:
-    """List scenes (camera angles / B-roll). scenes[0] is the main (has audio)."""
-    return _project(project_id).get("scenes", [])
+    """List scenes (camera angles / B-roll) with each file's `duration` and
+    `has_audio`. scenes[0] is the main (carries the audio). Check `duration`: a
+    secondary camera shorter than the talk can only be shown up to that point."""
+    return _call("GET", f"/api/projects/{project_id}/scenes").json()
+
+
+@mcp.tool()
+def list_scene_changes(project_id: str, scene: str = "main", threshold: float = 0.4,
+                       crop: str = "", start: float | None = None,
+                       end: float | None = None) -> list[dict]:
+    """Detect big picture changes in a scene's video — slide / shot transitions —
+    to place scene cuts on real boundaries instead of guessing. Returns
+    [{t, score}]. Lower `threshold` (0..1) = more sensitive. `crop` is an ffmpeg
+    crop expr "w:h:x:y" to ignore a region (e.g. a moving webcam inset so it
+    doesn't trigger false positives). `start`/`end` limit the scanned range."""
+    params: dict[str, Any] = {"scene": scene, "threshold": threshold, "crop": crop}
+    if start is not None:
+        params["start"] = start
+    if end is not None:
+        params["end"] = end
+    return _call("GET", f"/api/projects/{project_id}/scene-changes",
+                 params=params, timeout=900).json()
 
 
 @mcp.tool()
@@ -309,6 +410,25 @@ def clear_scene_cuts(project_id: str) -> list[dict]:
     """Remove all scene switches (everything reverts to the main angle)."""
     _patch(project_id, {"scene_cuts": []})
     return []
+
+
+@mcp.tool()
+def set_scene_cuts(project_id: str, cuts: list[dict]) -> list[dict]:
+    """Replace the ENTIRE scene-cut timeline in one atomic write — the fast way to
+    lay down a dynamic edit (many switches) at once, instead of clear + N adds.
+    Each item is {time, scene_id, id?}; scene_id must exist (use "main" for the
+    primary angle). Cuts are validated and returned sorted by time."""
+    proj = _project(project_id)
+    valid = {s["id"] for s in proj.get("scenes", [])}
+    out: list[dict] = []
+    for c in cuts:
+        if c.get("scene_id") not in valid:
+            raise RuntimeError(f"Scène inconnue: {c.get('scene_id')}")
+        out.append({"id": c.get("id") or _uid("cut-"),
+                    "time": float(c["time"]), "scene_id": c["scene_id"]})
+    out.sort(key=lambda c: c["time"])
+    _patch(project_id, {"scene_cuts": out})
+    return out
 
 
 # --- overlays ---------------------------------------------------------------

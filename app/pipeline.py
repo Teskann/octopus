@@ -25,7 +25,15 @@ def process_project(project_id: str, language: str | None) -> None:
     video_path = store.source_path(project)
     wav_path = pdir / "audio.wav"
     try:
-        _set(project, status="processing", progress=0.05, message="Reading video…")
+        _set(project, status="processing", progress=0.03, message="Preparing video…")
+        # One-time: move the moov atom to the front so the browser can stream the
+        # source (and play its audio) immediately instead of buffering the whole
+        # file first. Skipped on re-transcribe (the source is already optimized).
+        if not project.get("source_faststart"):
+            media.faststart_remux(video_path)
+            _set(project, source_faststart=True)
+
+        _set(project, progress=0.05, message="Reading video…")
         info = media.probe_video(video_path)
         if project.get("scenes"):
             project["scenes"][0]["width"] = info.width
