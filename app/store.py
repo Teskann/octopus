@@ -99,6 +99,7 @@ def new_project(name: str, source_filename: str) -> dict:
     project = {
         "id": pid,
         "version": SCHEMA_VERSION,
+        "rev": 0,                  # bumped on every save() (see save/ GET /rev)
         "name": name,
         "status": "created",       # created | processing | ready | error
         "progress": 0.0,
@@ -145,6 +146,10 @@ def new_project(name: str, source_filename: str) -> dict:
 def save(project: dict) -> None:
     pid = project["id"]
     with _LOCK:
+        # Monotonic revision bumped on EVERY write (frontend PATCH, segment edits,
+        # scene ops, MCP agent, workers). The editor polls it (GET /rev) to notice
+        # and live-reload changes made outside the browser (see Editor.tsx).
+        project["rev"] = project.get("rev", 0) + 1
         _CACHE[pid] = project
         _json_path(pid).write_text(
             json.dumps(project, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -171,6 +176,7 @@ def get(project_id: str) -> dict | None:
         sc.setdefault("mode", "crop" if sc.get("is_main") else "fit")
         sc.setdefault("crop", {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0})
         sc.setdefault("color", SCENE_COLORS[i % len(SCENE_COLORS)])
+    project.setdefault("rev", 0)
     project.setdefault("scene_cuts", [])
     project.setdefault("whisper_prompt", "")
     project.setdefault("translations", {})

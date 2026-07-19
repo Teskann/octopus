@@ -89,6 +89,11 @@ export function Editor({
   const cutsTimer = useRef<number>();
   const sceneTimer = useRef<number>();
   const promptTimer = useRef<number>();
+  // Live-reload bookkeeping: the last project revision we've reconciled with, and
+  // when we last touched a locally-edited slice (so a debounced save in flight is
+  // not mistaken for — and clobbered by — an external change).
+  const revRef = useRef<number>(initial.rev ?? 0);
+  const lastEditRef = useRef<number>(0);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -370,6 +375,7 @@ export function Editor({
   function updateStyle(patch: Partial<Style>) {
     const next = { ...style, ...patch };
     setStyle(next);
+    lastEditRef.current = performance.now();
     window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
       api.patchProject(project.id, { style: next }).catch(() => {});
@@ -378,6 +384,7 @@ export function Editor({
 
   function updateOverlays(next: Overlay[]) {
     setOverlays(next);
+    lastEditRef.current = performance.now();
     window.clearTimeout(overlayTimer.current);
     overlayTimer.current = window.setTimeout(() => {
       api.patchProject(project.id, { overlays: next }).catch(() => {});
@@ -390,6 +397,7 @@ export function Editor({
 
   function updateClips(next: Clip[]) {
     setClips(next);
+    lastEditRef.current = performance.now();
     window.clearTimeout(clipTimer.current);
     clipTimer.current = window.setTimeout(() => {
       api.patchProject(project.id, { clips: next }).catch(() => {});
@@ -399,6 +407,7 @@ export function Editor({
   function updateFrame(patch: Partial<Frame>) {
     const next = { ...frame, ...patch };
     setFrame(next);
+    lastEditRef.current = performance.now();
     window.clearTimeout(frameTimer.current);
     frameTimer.current = window.setTimeout(() => {
       api.patchProject(project.id, { frame: next }).catch(() => {});
@@ -407,6 +416,7 @@ export function Editor({
 
   function updateContext(next: string) {
     setWhisperPrompt(next);
+    lastEditRef.current = performance.now();
     window.clearTimeout(promptTimer.current);
     promptTimer.current = window.setTimeout(() => {
       api.patchProject(project.id, { whisper_prompt: next }).catch(() => {});
@@ -415,6 +425,7 @@ export function Editor({
 
   function updateScenes(next: Scene[]) {
     setProject((p) => ({ ...p, scenes: next }));
+    lastEditRef.current = performance.now();
     window.clearTimeout(sceneTimer.current);
     sceneTimer.current = window.setTimeout(() => {
       api.patchProject(project.id, { scenes: next }).catch(() => {});
@@ -435,6 +446,7 @@ export function Editor({
 
   function updateSceneCuts(next: SceneCut[]) {
     setSceneCuts(next);
+    lastEditRef.current = performance.now();
     window.clearTimeout(cutsTimer.current);
     cutsTimer.current = window.setTimeout(() => {
       api.patchProject(project.id, { scene_cuts: next }).catch(() => {});
@@ -476,18 +488,22 @@ export function Editor({
   async function reload() {
     const p = await api.getProject(project.id);
     setProject(p);
+    revRef.current = p.rev;
   }
 
   // Full reload: also reset the locally-edited slices from the server. Used when
   // accepting an external change (agent edits); discards any unsaved local edit.
-  async function reloadAll() {
-    const p = await api.getProject(project.id);
+  // Pass a `preloaded` project to reuse a fetch the poller already made.
+  async function reloadAll(preloaded?: Project) {
+    const p = preloaded ?? (await api.getProject(project.id));
     setProject(p);
     setStyle(p.style);
     setOverlays(p.overlays);
     setClips(p.clips);
     setFrame(p.frame);
     setSceneCuts(p.scene_cuts);
+    setWhisperPrompt(p.whisper_prompt || "");
+    revRef.current = p.rev;
     setExternalChange(false);
   }
 
@@ -498,6 +514,9 @@ export function Editor({
                   scene_cuts: sceneCuts, whisper_prompt: whisperPrompt };
   const savedRef = useRef(saved);
   savedRef.current = saved;
+  // Live snapshot of the whole project (name/segments/scenes) for the poller.
+  const projectRef = useRef(project);
+  projectRef.current = project;
 
   async function flush() {
     window.clearTimeout(saveTimer.current);
@@ -576,33 +595,51 @@ export function Editor({
           pointerEvents: stage ? "none" : "auto",
         };
 
-  // Poll for changes made outside this editor (the MCP agent writes via the same
-  // API). We compare the server's content to our live edits; a difference that is
-  // STABLE across two polls (so it isn't just our own debounced save landing)
-  // means the project was changed elsewhere → surface a reload banner.
+  // Live-reload changes made outside this editor (the MCP agent writes via the
+  // same API). We poll a cheap revision counter; when it moves we pull the project
+  // once and compare it to our live edits. A genuine external change auto-reloads
+  // the editor so the agent's edit shows immediately AND our next debounced save
+  // can't clobber it. If we have an unsaved edit in flight (or a translation is
+  // streaming), we fall back to the manual banner so active work is never dropped.
   useEffect(() => {
-    const sig = (p: Project, ov: Overlay[], cl: Clip[], sc: SceneCut[], st: Style, fr: Frame) =>
+    const sig = (p: Project, ov: Overlay[], cl: Clip[], sc: SceneCut[], st: Style, fr: Frame, wp: string) =>
       JSON.stringify({
         name: p.name, style: st, frame: fr, overlays: ov, clips: cl, scene_cuts: sc,
-        scenes: p.scenes,
+        scenes: p.scenes, whisper_prompt: wp,
         segments: p.segments.map((s) => [s.id, s.start, s.end, s.text, s.translation]),
       });
-    const local = sig(project, overlays, clips, sceneCuts, style, frame);
-    let prevServer = "";
     const id = window.setInterval(async () => {
-      let fresh: Project;
+      const pid = projectRef.current.id;
+      let rev: number;
       try {
-        fresh = await api.getProject(project.id);
+        rev = await api.projectRev(pid);
       } catch {
         return;
       }
-      const server = sig(fresh, fresh.overlays, fresh.clips, fresh.scene_cuts, fresh.style, fresh.frame);
-      if (server === local) setExternalChange(false);
-      else if (server === prevServer) setExternalChange(true);
-      prevServer = server;
-    }, 5000);
+      if (rev === revRef.current) return; // nothing changed since we last synced
+      let fresh: Project;
+      try {
+        fresh = await api.getProject(pid);
+      } catch {
+        return;
+      }
+      revRef.current = fresh.rev;
+      const s = savedRef.current;
+      const local = sig(projectRef.current, s.overlays, s.clips, s.scene_cuts, s.style, s.frame, s.whisper_prompt);
+      const server = sig(fresh, fresh.overlays, fresh.clips, fresh.scene_cuts, fresh.style, fresh.frame, fresh.whisper_prompt || "");
+      if (server === local) {
+        setExternalChange(false); // it was our own save landing — already in sync
+        return;
+      }
+      const dirty = performance.now() - lastEditRef.current < 2000;
+      if (dirty || fresh.translate_status === "running") {
+        setExternalChange(true); // don't clobber an edit in flight — let the user pick
+      } else {
+        reloadAll(fresh); // refresh instantly with the fetch we already have
+      }
+    }, 1500);
     return () => window.clearInterval(id);
-  }, [project, overlays, clips, sceneCuts, style, frame]);
+  }, []);
 
   return (
     <div className="editor">

@@ -126,7 +126,7 @@ def get_frame(project_id: str, t: float, width: int = 480,
     return Image(data=r.content, format="jpeg")
 
 
-@mcp.tool()
+@mcp.tool(structured_output=False)
 def get_frames(project_id: str, times: list[float], width: int = 480,
                mode: str = "source", scene: str = "main",
                apply_crop: bool = True) -> list[Image]:

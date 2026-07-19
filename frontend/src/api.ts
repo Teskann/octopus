@@ -32,6 +32,15 @@ export const api = {
     return json(await fetch(`/api/projects/${id}`, { cache: "no-store" }));
   },
 
+  // Cheap revision counter (bumped on every backend write) — polled by the editor
+  // to notice external changes without fetching the whole project each tick.
+  async projectRev(id: string): Promise<number> {
+    const r = await json<{ rev: number }>(
+      await fetch(`/api/projects/${id}/rev`, { cache: "no-store" })
+    );
+    return r.rev;
+  },
+
   async renameProject(id: string, name: string): Promise<Project> {
     return json(
       await fetch(`/api/projects/${id}`, {

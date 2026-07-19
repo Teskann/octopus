@@ -104,6 +104,17 @@ def get_project(project_id: str) -> dict:
     return project
 
 
+@router.get("/{project_id}/rev")
+def get_project_rev(project_id: str) -> dict:
+    """Cheap revision counter, bumped on every write. The editor polls this to
+    live-reload changes made outside the browser (e.g. an MCP agent) instead of
+    fetching the whole project each tick."""
+    project = store.get(project_id)
+    if project is None:
+        raise HTTPException(404, "Unknown project")
+    return {"rev": project.get("rev", 0)}
+
+
 @router.get("/{project_id}/transcript")
 def get_transcript(project_id: str, q: str = "", start: float | None = None,
                    end: float | None = None, offset: int = 0,

@@ -147,6 +147,7 @@ export interface ContextPreset {
 
 export interface Project {
   id: string;
+  rev: number; // bumped on every backend write; the editor polls it to live-reload
   name: string;
   status: ProjectStatus;
   progress: number;
