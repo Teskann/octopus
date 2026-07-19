@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conférence C++ — Montage dynamique</title>
+<style>
+  :root{
+    --bg:#0f1220; --card:#181c2e; --card2:#1f2438; --ink:#e9ecf5; --muted:#9aa3c0;
+    --line:#2a3050; --accent:#8b9dff; --slides:#6366f1; --pres:#ef4444;
+    --del:#3a1d24; --delink:#ff9db0; --add:#16311f; --addink:#8ff0ae;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(180deg,#0d1020,#12162a);color:var(--ink);
+    font:18px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    padding:40px 22px 90px}
+  .wrap{max-width:1060px;margin:0 auto}
+  h1{font-size:2.15rem;margin:0 0 6px;letter-spacing:-.02em}
+  .sub{color:var(--muted);font-size:1.05rem;margin-bottom:30px}
+  h2{font-size:1.5rem;margin:44px 0 8px;letter-spacing:-.01em}
+  h2 .tag{font-size:.85rem;color:var(--muted);font-weight:500}
+  .lead{color:var(--muted);margin:0 0 18px}
+  code,.mono{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:.92em}
+  .pill{display:inline-block;padding:2px 10px;border-radius:999px;font-size:.8rem;font-weight:600}
+  .pill.slides{background:rgba(99,102,241,.18);color:#b7bdff;border:1px solid rgba(99,102,241,.5)}
+  .pill.pres{background:rgba(239,68,68,.16);color:#ff9aa0;border:1px solid rgba(239,68,68,.5)}
+  .kpi{display:flex;gap:12px;flex-wrap:wrap;margin:6px 0 8px}
+  .kpi div{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:12px 18px;flex:1;min-width:130px}
+  .kpi b{display:block;font-size:1.7rem;line-height:1.1}
+  .kpi span{color:var(--muted);font-size:.85rem}
+  .note{border-left:3px solid var(--accent);background:rgba(139,157,255,.07);
+    padding:12px 16px;border-radius:0 10px 10px 0;margin:14px 0;color:#cdd3ef}
+  .note.warn{border-color:#f0b849;background:rgba(240,184,73,.08)}
+  ul.method{margin:8px 0;padding-left:22px}
+  ul.method li{margin:6px 0}
+
+  /* timeline */
+  .tl{margin-top:10px;border-radius:12px;overflow:hidden;border:1px solid var(--line)}
+  .tl .row{display:flex;align-items:center;gap:14px;padding:11px 16px;border-bottom:1px solid var(--line)}
+  .tl .row:last-child{border-bottom:0}
+  .tl .row.s{background:linear-gradient(90deg,rgba(99,102,241,.13),transparent)}
+  .tl .row.p{background:linear-gradient(90deg,rgba(239,68,68,.11),transparent)}
+  .tl .t{font-family:ui-monospace,monospace;color:var(--accent);min-width:60px}
+  .tl .sl{color:var(--muted);font-size:.8rem;min-width:78px}
+  .tl .d{color:#dfe3f2;font-size:.97rem}
+
+  /* clips */
+  .clips{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:6px}
+  .clip{background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .clip.hot{border-color:rgba(139,157,255,.5)}
+  .clip .tc{font-family:ui-monospace,monospace;color:var(--accent);font-size:.9rem}
+  .clip .dur{float:right;color:var(--muted);font-size:.8rem;background:#151a2c;border:1px solid var(--line);border-radius:999px;padding:1px 9px}
+  .clip .name{margin-top:6px;font-weight:600;line-height:1.35}
+  .n{display:inline-block;width:30px;color:var(--muted)}
+  .foot{color:var(--muted);font-size:.9rem;margin-top:40px;border-top:1px solid var(--line);padding-top:16px}
+  b.g{color:var(--addink)} b.r{color:var(--delink)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎬 Conférence C++ — montage dynamique</h1>
+  <div class="sub">Projet <code>conference</code> · « Éradiquer 70&nbsp;% des failles de sécurité » · 39&nbsp;min · scènes calées sur les <b>39 slides réelles</b></div>
+
+  <div class="kpi">
+    <div><b>25</b><span>clips (chacun une explication complète)</span></div>
+    <div><b>8</b><span>coupures de scène dynamiques</span></div>
+    <div><b>35</b><span>corrections de transcription</span></div>
+    <div><b>39</b><span>slides analysées (ODP + screenshots)</span></div>
+  </div>
+
+  <!-- METHOD -->
+  <h2>Méthode — rendu dynamique</h2>
+  <p class="lead">Pour placer les scènes au bon endroit, j'ai croisé trois sources plutôt que de deviner :</p>
+  <ul class="method">
+    <li>📑 <b>L'ODP</b> décompressé → texte des <b>39 slides</b> (titres, sections, exemples de code).</li>
+    <li>📸 <b>API screenshot</b> (<code>get_frame</code> sur la scène Slides) à des instants précis → pour lire le <b>n° de slide</b> et voir ce qui est à l'écran (la scène Slides montre déjà slide + présentateur en médaillon).</li>
+    <li>🎞️ <b>Détection de transitions</b> (ffmpeg scene-detection sur la zone slide) → timestamps exacts des changements de slide.</li>
+  </ul>
+  <div class="note warn">
+    <b>Découverte qui verrouille la règle des 21:29.</b> La caméra <span class="pill pres">Présentateur</span> (<code>scene-f591abf2.mp4</code>) dure <b>exactement 1289,98&nbsp;s = 21:29</b> : la vidéo du présentateur <b>s'arrête là</b>. Après ce point, on ne <em>peut</em> physiquement montrer que les Slides — ta règle était donc une contrainte matérielle. ✔️
+  </div>
+
+  <!-- SCENES -->
+  <h2>1. Scènes dynamiques <span class="tag">— <span class="pill slides">Slides</span> quand il y a du contenu/exemple · <span class="pill pres">Présentateur</span> sur les slides « titre / section / récap »</span></h2>
+  <p class="lead">8 coupures calées sur les vraies transitions de slides. Le présentateur n'apparaît que sur les slides <em>nues</em> (intro, section IA, transition « diagnostic », récap) — partout ailleurs on regarde la slide.</p>
+  <div class="tl">
+    <div class="row p"><span class="t">0:00</span><span class="sl">slides 1–2</span><span class="d">Intro &amp; « Pourquoi parler de sécurité »</span></div>
+    <div class="row s"><span class="t">0:54</span><span class="sl">slides 3–5</span><span class="d">Coût (Heartbleed/WannaCry), Therac-25, <b>Cyber Resilience Act</b></span></div>
+    <div class="row p"><span class="t">4:55</span><span class="sl">slide 6</span><span class="d">« L'IA offensive » — titre nu, discours à la salle</span></div>
+    <div class="row s"><span class="t">5:53</span><span class="sl">slide 7</span><span class="d">« L'addition SVP&nbsp;! » — résumé des risques</span></div>
+    <div class="row p"><span class="t">6:21</span><span class="sl">slide 8</span><span class="d">« Comment faire face&nbsp;? Posons un diagnostic »</span></div>
+    <div class="row s"><span class="t">6:33</span><span class="sl">slides 9–14</span><span class="d">70&nbsp;%, triade noire, définition UB, les 2 exemples de code</span></div>
+    <div class="row p"><span class="t">14:05</span><span class="sl">slides 15–16</span><span class="d">Récap « Points à retenir » + transition</span></div>
+    <div class="row s"><span class="t">14:49</span><span class="sl">slides 17→39</span><span class="d">Code (ranges, lambdas, constexpr, constest…) <b>et tout le reste</b> — Slides forcé après 21:29</span></div>
+  </div>
+  <div class="note">
+    <b>Ce qui a changé vs la 1<sup>re</sup> version</b> (grâce aux screenshots) : le <b>CRA (slide 5)</b> est du contenu → repassé en <b class="g">Slides</b> (avant je l'avais mis Présentateur « au jugé »). L'<b>IA (slide 6)</b>, titre nu, passe en <b class="r">Présentateur</b>. Le récap est resserré à <b>14:05</b> (avant 13:45) car l'exemple de code du pointeur nul reste à l'écran jusque-là.
+  </div>
+
+  <!-- CLIPS -->
+  <h2>2. Les 25 clips <span class="tag">— une explication entière chacun, jamais commencée en retard ni coupée</span></h2>
+  <p class="lead">Bornes ajustées sur les frontières de mots pour <b>ne pas couper</b> une explication et <b>ne pas la démarrer après son début</b>. Le gros exemple <code>return true</code> (2&nbsp;min&nbsp;20, 2 idées) a été scindé en deux clips atomiques.</p>
+  <div class="clips">
+    <div class="clip"><span class="dur">73 s</span><span class="tc">0:54 → 2:07</span><div class="name"><span class="n">01</span>Le coût des failles (Heartbleed, WannaCry)</div></div>
+    <div class="clip"><span class="dur">35 s</span><span class="tc">2:09 → 2:44</span><div class="name"><span class="n">02</span>Un bug peut coûter des vies (Therac-25)</div></div>
+    <div class="clip"><span class="dur">45 s</span><span class="tc">4:09 → 4:54</span><div class="name"><span class="n">03</span>Cyber Resilience Act : les sanctions</div></div>
+    <div class="clip"><span class="dur">56 s</span><span class="tc">4:56 → 5:52</span><div class="name"><span class="n">04</span>L'IA et la sécurité offensive</div></div>
+    <div class="clip"><span class="dur">36 s</span><span class="tc">6:31 → 7:07</span><div class="name"><span class="n">05</span>D'où vient le fameux 70&nbsp;%</div></div>
+    <div class="clip"><span class="dur">65 s</span><span class="tc">7:09 → 8:14</span><div class="name"><span class="n">06</span>Les 3 familles de corruption mémoire</div></div>
+    <div class="clip"><span class="dur">26 s</span><span class="tc">8:15 → 8:41</span><div class="name"><span class="n">07</span>3 problèmes, une seule cause : l'UB</div></div>
+    <div class="clip"><span class="dur">39 s</span><span class="tc">8:47 → 9:26</span><div class="name"><span class="n">08</span>Un comportement indéfini, c'est quoi ?</div></div>
+    <div class="clip hot"><span class="dur">47 s</span><span class="tc">9:29 → 10:16</span><div class="name"><span class="n">09a</span>La fonction qui semble normale (mais UB)</div></div>
+    <div class="clip hot"><span class="dur">93 s</span><span class="tc">10:17 → 11:50</span><div class="name"><span class="n">09b</span>Pourquoi le compilateur retourne toujours <code>true</code></div></div>
+    <div class="clip"><span class="dur">105 s</span><span class="tc">11:53 → 13:38</span><div class="name"><span class="n">10</span>Le « voyage dans le temps » des UB</div></div>
+    <div class="clip"><span class="dur">41 s</span><span class="tc">14:49 → 15:30</span><div class="name"><span class="n">11</span>Arrêtez l'indexation manuelle (ranges)</div></div>
+    <div class="clip"><span class="dur">28 s</span><span class="tc">16:40 → 17:08</span><div class="name"><span class="n">12</span>Utilisez <code>.at()</code> pour être safe</div></div>
+    <div class="clip"><span class="dur">49 s</span><span class="tc">17:54 → 18:43</span><div class="name"><span class="n">13</span><code>std::generator</code>, le tip C++23</div></div>
+    <div class="clip"><span class="dur">50 s</span><span class="tc">19:04 → 19:53</span><div class="name"><span class="n">14</span>Le piège des lambdas (dangling reference)</div></div>
+    <div class="clip"><span class="dur">27 s</span><span class="tc">20:01 → 20:28</span><div class="name"><span class="n">15</span>Capture par valeur vs par référence</div></div>
+    <div class="clip"><span class="dur">62 s</span><span class="tc">20:28 → 21:30</span><div class="name"><span class="n">16</span>Besoin d'une référence ? <code>shared_ptr</code> + <code>weak_ptr</code></div></div>
+    <div class="clip hot"><span class="dur">103 s</span><span class="tc">22:27 → 24:10</span><div class="name"><span class="n">17</span>Les sanitizers (avantages <b>+ limites</b>)</div></div>
+    <div class="clip"><span class="dur">35 s</span><span class="tc">24:16 → 24:51</span><div class="name"><span class="n">18</span>C++ est aussi un langage interprété</div></div>
+    <div class="clip"><span class="dur">26 s</span><span class="tc">25:39 → 26:05</span><div class="name"><span class="n">19</span>Le lien constexpr ↔ sécurité</div></div>
+    <div class="clip hot"><span class="dur">53 s</span><span class="tc">26:39 → 27:32</span><div class="name"><span class="n">20</span>Prouver l'absence d'UB (exemple + godbolt)</div></div>
+    <div class="clip"><span class="dur">34 s</span><span class="tc">27:36 → 28:10</span><div class="name"><span class="n">21</span>Constexprifier toute la code base</div></div>
+    <div class="clip hot"><span class="dur">114 s</span><span class="tc">28:18 → 30:12</span><div class="name"><span class="n">22</span><code>constest</code> : UB détecté à la compilation <b>et au runtime</b></div></div>
+    <div class="clip hot"><span class="dur">71 s</span><span class="tc">30:20 → 31:31</span><div class="name"><span class="n">23</span>Pas besoin de Rust : les bénéfices</div></div>
+    <div class="clip"><span class="dur">46 s</span><span class="tc">34:42 → 35:28</span><div class="name"><span class="n">24</span>Q&amp;A : sanitizer vs optimisation du compilateur</div></div>
+  </div>
+  <div class="note">
+    <b>Explications rallongées pour ne rien couper</b> (surlignées) : #17 sanitizers inclut désormais les <em>limites</em> (jusqu'à 24:10), #22 constest va jusqu'au « compile <em>et</em> runtime » (30:12), #23 avantages jusqu'aux « milliards économisés ». #20 démarre à l'exemple du vecteur vide avant godbolt. Plusieurs clips commencent une phrase plus tôt (#01, #05, #06, #08, #13, #15, #19, #24) pour attraper le début réel de l'explication.
+  </div>
+
+  <div class="foot">
+    Tout est enregistré dans le projet <code>conference</code>. Les corrections de transcription (shared&nbsp;pointer, static_assert, bloc consteval, clang-tidy, SonarQube…) sont inchangées. Ouvre l'éditeur pour prévisualiser les crossfades de scène puis exporter.
+  </div>
+</div>
+</body>
+</html>

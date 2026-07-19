@@ -643,6 +643,28 @@ input[type="checkbox"]:checked::after {
 .project-actions .link { font-size: 0.95rem; padding: 0.2rem 0.35rem; }
 .project-actions .danger { color: var(--err); }
 
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center; padding: 1rem;
+  animation: modal-fade 0.12s ease-out;
+}
+.modal {
+  width: 100%; max-width: 380px; background: var(--panel-2);
+  border: 1px solid var(--border-2); border-radius: 14px; padding: 1.3rem;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  display: flex; flex-direction: column; gap: 1rem;
+}
+.modal-title { margin: 0; font-size: 1.05rem; font-weight: 600; }
+.modal-input {
+  width: 100%; box-sizing: border-box; font-size: 1rem; padding: 0.6rem 0.75rem;
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border-2); border-radius: 8px;
+}
+.modal-input:focus { border-color: var(--muted); outline: none; }
+.modal-actions { display: flex; justify-content: flex-end; align-items: center; gap: 0.75rem; }
+@keyframes modal-fade { from { opacity: 0; } to { opacity: 1; } }
+
 .presets { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1.2rem; }
 .preset-chip {
   display: inline-flex; align-items: center; gap: 0.25rem;
@@ -665,3 +687,12 @@ input[type="checkbox"]:checked::after {
   border-radius: 999px; padding: 0.3rem 0.7rem; font-size: 0.82rem; cursor: pointer;
 }
 .preset-save:hover { border-color: var(--border-2); }
+
+/* Banner shown when the project was changed outside this editor (MCP agent). */
+.ext-change-banner {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: 0.5rem 1rem; background: #3a2f12; color: #ffe08a;
+  border: 1px solid #6b5518; border-radius: 8px; font-size: 0.9rem;
+}
+.ext-change-actions { display: flex; align-items: center; gap: 0.6rem; }

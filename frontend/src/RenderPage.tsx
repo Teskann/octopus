@@ -34,6 +34,9 @@ export function RenderPage() {
   const params = new URLSearchParams(window.location.search);
   const projectId = params.get("project") || "";
   const clipId = params.get("clip") || "";
+  // Single-frame mode (get_frame): no clip, just mount the composition over the
+  // whole video and wait to be seeked to an arbitrary timestamp.
+  const frameMode = params.get("frame") === "1";
   const [project, setProject] = useState<Project | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,7 +53,9 @@ export function RenderPage() {
 
   if (error) return <div style={{ color: "#fff" }}>{error}</div>;
   if (!project) return null;
-  const clip = project.clips.find((c) => c.id === clipId);
+  const clip = frameMode
+    ? { start: 0, end: project.duration || 1 }
+    : project.clips.find((c) => c.id === clipId);
   if (!clip) {
     window.__render.error = "Clip introuvable";
     return <div style={{ color: "#fff" }}>Clip introuvable</div>;

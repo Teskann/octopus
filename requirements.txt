@@ -5,3 +5,5 @@ httpx>=0.27
 # Clip export renders the preview in a headless browser (app/render.py).
 # After installing, run: playwright install chrome  (see scripts/setup-render.sh)
 playwright>=1.40
+# MCP server that lets an agent (Claude Code) drive the editor (mcp_server/).
+mcp[cli]>=1.2

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { formatTime } from "../time";
 import type { ProjectSummary } from "../types";
@@ -21,6 +21,10 @@ export function Home({
   onOpen: (summary: ProjectSummary) => void;
 }) {
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
+  const [renaming, setRenaming] = useState<ProjectSummary | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
+  const renameInput = useRef<HTMLInputElement>(null);
 
   async function refresh() {
     try {
@@ -34,10 +38,23 @@ export function Home({
     refresh();
   }, []);
 
-  async function rename(p: ProjectSummary) {
-    const name = window.prompt("Nouveau nom du projet ?", p.name)?.trim();
-    if (!name || name === p.name) return;
-    await api.renameProject(p.id, name).catch(() => {});
+  function openRename(p: ProjectSummary) {
+    setRenaming(p);
+    setRenameValue(p.name);
+  }
+
+  useEffect(() => {
+    if (renaming) renameInput.current?.select();
+  }, [renaming]);
+
+  async function submitRename() {
+    if (!renaming) return;
+    const name = renameValue.trim();
+    if (!name || name === renaming.name) { setRenaming(null); return; }
+    setRenameBusy(true);
+    await api.renameProject(renaming.id, name).catch(() => {});
+    setRenameBusy(false);
+    setRenaming(null);
     refresh();
   }
 
@@ -74,7 +91,7 @@ export function Home({
                   </span>
                 </button>
                 <div className="project-actions">
-                  <button className="link" onClick={() => rename(p)} title="Renommer">
+                  <button className="link" onClick={() => openRename(p)} title="Renommer">
                     ✏️
                   </button>
                   <button className="link danger" onClick={() => remove(p)} title="Supprimer">
@@ -91,6 +108,34 @@ export function Home({
         <h2>Nouveau projet</h2>
         <Uploader onCreated={onNew} />
       </section>
+
+      {renaming && (
+        <div className="modal-backdrop" onClick={() => !renameBusy && setRenaming(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3 className="modal-title">Renommer le projet</h3>
+            <input
+              ref={renameInput}
+              className="modal-input"
+              value={renameValue}
+              autoFocus
+              disabled={renameBusy}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitRename();
+                else if (e.key === "Escape") setRenaming(null);
+              }}
+            />
+            <div className="modal-actions">
+              <button className="link" onClick={() => setRenaming(null)} disabled={renameBusy}>
+                Annuler
+              </button>
+              <button className="btn sm" onClick={submitRename} disabled={renameBusy}>
+                {renameBusy ? "…" : "Renommer"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

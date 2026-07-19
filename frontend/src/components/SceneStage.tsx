@@ -33,10 +33,14 @@ export function SceneStage({
 
   const vids = () => [bgRef.current, fgRef.current].filter(Boolean) as HTMLVideoElement[];
 
-  // Only the active scene follows the playhead + play state. The video is muted,
-  // so instead of seeking (which flickers) we nudge its playbackRate to catch up
-  // to the audio — keeping image and sound tightly in sync. Hard-seek only on a
-  // large drift (e.g. after a jump).
+  // Only the active scene follows the playhead + play state. The muted scene
+  // plays freely at ~1×; we bias its playbackRate PROPORTIONALLY to the drift so
+  // it eases back to zero — the further behind, the faster it runs (up to 2×),
+  // converging in ~1s with no backward jump or flicker. A hard seek is used ONLY
+  // for a genuine timeline jump (drift > 1.5s), and NEVER while the element is
+  // already seeking: re-issuing `currentTime = t` at 60fps is what wedged the
+  // decoder ("freeze until I reopen") and yanked the image backwards; the weak
+  // 1.06× recovery is what left it 1-2s behind the audio.
   useEffect(() => {
     if (!active) {
       vids().forEach((v) => { v.pause(); v.playbackRate = 1; });
@@ -44,34 +48,45 @@ export function SceneStage({
     }
     for (const v of vids()) {
       const drift = v.currentTime - t; // + = image ahead, - = image behind
-      if (playing) {
-        if (Math.abs(drift) > 0.5) {
-          try { v.currentTime = t; } catch { /* ignore */ }
-          v.playbackRate = 1;
-        } else if (drift > 0.05) {
-          v.playbackRate = 0.94; // image ahead → slow down
-        } else if (drift < -0.05) {
-          v.playbackRate = 1.06; // image behind → speed up to catch the sound
-        } else {
-          v.playbackRate = 1;
-        }
-        if (v.paused) v.play().catch(() => {});
-      } else {
+      if (!playing) {
         v.playbackRate = 1;
-        if (Math.abs(drift) > 0.05) { try { v.currentTime = t; } catch { /* ignore */ } }
+        if (!v.seeking && Math.abs(drift) > 0.05) {
+          try { v.currentTime = t; } catch { /* ignore */ }
+        }
         v.pause();
+        continue;
       }
+      if (Math.abs(drift) > 1.5) {
+        if (!v.seeking) { try { v.currentTime = t; } catch { /* ignore */ } }
+        v.playbackRate = 1;
+      } else {
+        // Proportional catch-up: rate 1 at zero drift, clamped to [0.5×, 2×].
+        v.playbackRate = Math.min(2, Math.max(0.5, 1 - drift * 2));
+      }
+      if (v.paused) v.play().catch(() => {});
     }
   }, [active, t, playing]);
 
-  // Snap to the current time whenever a source (re)loads.
+  // Snap to the current time whenever a source (re)loads. Force a REAL seek even
+  // when the target equals the current time (both 0 at open): setting currentTime
+  // to the value it already holds is a no-op, so the HW decoder never paints and
+  // the scene stays black/frozen until a manual seek. A tiny epsilon guarantees a
+  // seek → a decoded frame.
   useEffect(() => {
     const list = vids();
-    const onLoad = (e: Event) => {
-      const v = e.target as HTMLVideoElement;
-      try { v.currentTime = tRef.current; } catch { /* ignore */ }
+    const snap = (v: HTMLVideoElement) => {
+      const target = tRef.current;
+      try {
+        v.currentTime = Math.abs(v.currentTime - target) < 0.001 ? target + 0.001 : target;
+      } catch { /* ignore */ }
     };
-    list.forEach((v) => v.addEventListener("loadeddata", onLoad));
+    const onLoad = (e: Event) => snap(e.target as HTMLVideoElement);
+    list.forEach((v) => {
+      // Already decoded (loadeddata fired before this effect ran, e.g. the second
+      // fit-mode <video> of the same source) → kick now; otherwise wait for load.
+      if (v.readyState >= 2) snap(v);
+      else v.addEventListener("loadeddata", onLoad);
+    });
     return () => list.forEach((v) => v.removeEventListener("loadeddata", onLoad));
   }, []);
 

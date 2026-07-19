@@ -158,9 +158,12 @@ crop `frame.x/y/w/h`) is the **output window** and holds the captions.
   switch); only the `active` one is shown+played; switching is a CSS
   **crossfade+scale** (`.scene-overlay.active`). This is what makes switching
   stable (no reload / black / race).
-- **A/V sync**: scene videos are muted and follow the main's `currentTime` by
-  **nudging `playbackRate`** (0.94/1.06) to catch up, hard-seeking only on >0.5s
-  drift — avoids both flicker and audio-ahead-of-image.
+- **A/V sync**: scene videos are muted and follow the main's `currentTime` with
+  a **proportional playbackRate** bias (`1 - drift*2`, clamped 0.5×–2×) so drift
+  eases smoothly to zero — no backward jumps, no flicker. A hard seek fires ONLY
+  for a genuine jump (>1.5s drift) and NEVER while the element is already seeking
+  (spamming `currentTime = t` at 60fps wedged the decoder and left the image
+  1-2s behind — see `SceneStage.tsx`).
 - Editing a **secondary scene's** crop: its own source is shown full via
   `SceneSourceVideo` (sizes the frame to that scene's aspect) with the same
   `ReframeBox` on it.

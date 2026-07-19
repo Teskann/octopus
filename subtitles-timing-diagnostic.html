@@ -1,0 +1,270 @@
+<meta charset="utf-8">
+<title>Synchro mot-à-mot des sous-titres — diagnostic</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#2b3444;
+    --txt:#e6edf3; --muted:#9aa7b4; --accent:#4dabf7; --accent2:#8b7bff;
+    --good:#3fb950; --bad:#f85149; --warn:#e3b341;
+    --kw:#ff7b72; --str:#a5d6ff; --num:#79c0ff; --com:#8b949e; --fn:#d2a8ff; --var:#ffa657;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:linear-gradient(180deg,#0a0d12,#0d1117 240px);
+    color:var(--txt); font-size:18px; line-height:1.65;
+    font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  .wrap{max-width:960px; margin:0 auto; padding:56px 26px 120px}
+  header h1{font-size:2.15rem; line-height:1.2; margin:0 0 10px; letter-spacing:-.02em}
+  header p.lead{font-size:1.18rem; color:var(--muted); margin:0 0 6px}
+  .tag{display:inline-block; font-size:.82rem; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--accent); background:rgba(77,171,247,.1); border:1px solid rgba(77,171,247,.3);
+    padding:4px 12px; border-radius:999px; margin-bottom:22px}
+  h2{font-size:1.5rem; margin:52px 0 14px; letter-spacing:-.01em;
+    padding-bottom:8px; border-bottom:1px solid var(--border)}
+  h3{font-size:1.18rem; margin:30px 0 10px; color:#cdd9e5}
+  p{margin:12px 0}
+  code.inl{background:var(--panel2); border:1px solid var(--border); border-radius:6px;
+    padding:1px 7px; font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:.9em; color:var(--str)}
+  .card{background:var(--panel); border:1px solid var(--border); border-radius:14px;
+    padding:22px 26px; margin:20px 0}
+  .verdict{border-left:5px solid var(--accent); background:linear-gradient(90deg,rgba(77,171,247,.08),transparent)}
+  .verdict.bug{border-left-color:var(--bad); background:linear-gradient(90deg,rgba(248,81,73,.08),transparent)}
+  .verdict.good{border-left-color:var(--good); background:linear-gradient(90deg,rgba(63,185,80,.08),transparent)}
+  .verdict.warn{border-left-color:var(--warn); background:linear-gradient(90deg,rgba(227,179,65,.08),transparent)}
+  .verdict h3{margin-top:0}
+  pre{background:#0a0e14; border:1px solid var(--border); border-radius:12px;
+    padding:18px 20px; overflow-x:auto; margin:16px 0;
+    font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    font-size:.86rem; line-height:1.6}
+  pre .fname{display:block; color:var(--muted); font-size:.8rem; margin-bottom:10px;
+    border-bottom:1px solid var(--border); padding-bottom:8px}
+  .kw{color:var(--kw)} .str{color:var(--str)} .num{color:var(--num)}
+  .com{color:var(--com); font-style:italic} .fn{color:var(--fn)} .var{color:var(--var)} .dim{color:var(--muted)}
+  .diff{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:16px 0}
+  .diff>div{background:#0a0e14; border:1px solid var(--border); border-radius:12px; overflow:hidden}
+  .diff .hd{font-size:.8rem; padding:8px 16px; font-weight:600}
+  .diff .before .hd{background:rgba(248,81,73,.12); color:#ffb0ab; border-bottom:1px solid var(--border)}
+  .diff .after .hd{background:rgba(63,185,80,.12); color:#8ee79a; border-bottom:1px solid var(--border)}
+  .diff pre{border:none; border-radius:0; margin:0; font-size:.8rem}
+  .rm{background:rgba(248,81,73,.10); display:block; margin:0 -20px; padding:0 20px}
+  .add{background:rgba(63,185,80,.12); display:block; margin:0 -20px; padding:0 20px}
+  @media(max-width:760px){.diff{grid-template-columns:1fr}}
+  table{width:100%; border-collapse:collapse; margin:16px 0; font-size:.95rem}
+  th,td{text-align:left; padding:11px 14px; border-bottom:1px solid var(--border); vertical-align:top}
+  th{color:var(--muted); font-weight:600; font-size:.82rem; text-transform:uppercase; letter-spacing:.05em}
+  td .pill{font-size:.78rem; padding:2px 9px; border-radius:6px; font-weight:600}
+  .p-good{background:rgba(63,185,80,.15); color:#8ee79a}
+  .p-bad{background:rgba(248,81,73,.15); color:#ffb0ab}
+  .p-warn{background:rgba(227,179,65,.15); color:#f0d68a}
+  ul,ol{margin:12px 0; padding-left:26px} li{margin:7px 0}
+  .flow{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:18px 0; font-size:.9rem}
+  .flow .step{background:var(--panel2); border:1px solid var(--border); border-radius:9px; padding:9px 14px}
+  .flow .step.ok{border-color:rgba(63,185,80,.5)} .flow .step.ko{border-color:rgba(248,81,73,.5)}
+  .flow .ar{color:var(--muted)}
+  .kbd{font-size:.82rem; color:var(--muted)}
+  strong{color:#fff}
+  .foot{margin-top:60px; padding-top:20px; border-top:1px solid var(--border); color:var(--muted); font-size:.9rem}
+</style>
+
+<div class="wrap">
+<header>
+  <div class="tag">Diagnostic · sous-titres mot-à-mot</div>
+  <h1>Pourquoi la synchro par mot est « aléatoire »</h1>
+  <p class="lead">Les blocs sont bien calés, mais chaque mot ne s'allume pas au bon moment.
+  Voici la cause exacte — et non, ce n'est pas une limite de Whisper.</p>
+</header>
+
+<div class="card verdict bug">
+  <h3>⚡ Verdict en une phrase</h3>
+  <p style="margin-bottom:0">Whisper calcule <strong>déjà</strong> des horodatages par mot très précis
+  (via le DTW, qui est bien activé chez nous), mais il les écrit dans un champ à part appelé
+  <code class="inl">t_dtw</code>. Or notre code <code class="inl">app/whisper.py</code> lit le
+  <strong>mauvais champ</strong> (<code class="inl">offsets</code>, les temps grossiers), et
+  <strong>ignore complètement <code class="inl">t_dtw</code></strong>. On jette donc la précision
+  qu'on a payée, puis on « étale » les temps grossiers dans le bloc → l'impression d'aléatoire.</p>
+</div>
+
+<h2>1. Le symptôme, précisément</h2>
+<p>Ton observation est juste et c'est un indice fort :</p>
+<div class="flow">
+  <span class="step ok">Début de chaque bloc ✓ juste</span>
+  <span class="ar">→</span>
+  <span class="step ko">Position des mots ✗ dans le désordre</span>
+</div>
+<p>Ce contraste précis — <em>bornes correctes, intérieur faux</em> — est la signature d'un problème
+bien identifié, pas d'un bruit aléatoire. Cela veut dire que les <strong>temps de segment</strong>
+(le <code class="inl">[start, end]</code> de chaque ligne de sous-titre) sont fiables, mais que les
+<strong>temps de chaque mot</strong> à l'intérieur ne le sont pas. Reste à savoir <em>pourquoi</em>.</p>
+
+<h2>2. Ce que Whisper nous donne réellement</h2>
+<p>Pour chaque token, <code class="inl">whisper-cli -oj -ojf</code> écrit dans le JSON
+<strong>deux horodatages de nature différente</strong> :</p>
+
+<table>
+  <thead><tr><th>Champ JSON</th><th>Origine</th><th>Précision mot</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code class="inl">offsets.from / .to</code></td>
+      <td>Temps « décodeur » (<code class="inl">token.t0 / t1</code>) — heuristique tirée des tokens d'horodatage. Grossier, calé sur des fenêtres.</td>
+      <td><span class="pill p-bad">Médiocre</span></td>
+    </tr>
+    <tr>
+      <td><code class="inl">t_dtw</code></td>
+      <td>Alignement <em>Dynamic Time Warping</em> sur les têtes d'attention du modèle. C'est <strong>l'horodatage précis par mot</strong>.</td>
+      <td><span class="pill p-good">Excellente</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Voici le code source de whisper.cpp qui écrit le JSON par token — on voit clairement les deux champs cohabiter :</p>
+<pre><span class="fname">whisper.cpp — examples/cli/cli.cpp (sortie JSON par token)</span><span class="fn">value_s</span>(<span class="str">"text"</span>, mt.text.c_str(), <span class="kw">false</span>);
+<span class="kw">if</span> (mt.data.t0 &gt; -<span class="num">1</span> &amp;&amp; mt.t1 &gt; -<span class="num">1</span>) {
+    <span class="com">// "offsets" = t0/t1 grossiers (temps décodeur)</span>
+    <span class="fn">times_o</span>(mt.data.t0, mt.t1, <span class="kw">false</span>);   <span class="com">// → offsets.from = t0*10 (ms)</span>
+}
+<span class="fn">value_i</span>(<span class="str">"id"</span>,  mt.data.id, <span class="kw">false</span>);
+<span class="fn">value_f</span>(<span class="str">"p"</span>,   mt.data.p,  <span class="kw">false</span>);
+<span class="fn">value_f</span>(<span class="str">"t_dtw"</span>, mt.data.t_dtw, <span class="kw">true</span>);  <span class="com">// ← LE bon horodatage, en centisecondes (-1 si absent)</span></pre>
+
+<div class="card verdict good">
+  <h3>✓ Bonne nouvelle : le DTW est bien activé chez nous</h3>
+  <p>J'ai vérifié : <code class="inl">app/config.py</code> passe
+  <code class="inl">WHISPER_DTW = "large.v3.turbo"</code>, et c'est <strong>exactement</strong> l'un des
+  presets valides attendus par whisper.cpp (<code class="inl">if (params.dtw == "large.v3.turbo")</code>),
+  qui correspond bien au modèle <code class="inl">ggml-large-v3-turbo.bin</code>. Donc whisper
+  <strong>calcule bel et bien</strong> le champ <code class="inl">t_dtw</code> précis à chaque exécution.
+  Le problème n'est pas là — il est côté lecture.</p>
+</div>
+
+<h2>3. Le bug : on lit le mauvais champ</h2>
+<p>Dans <code class="inl">app/whisper.py</code>, la fonction qui transforme les tokens en mots lit
+<code class="inl">offsets</code> (les temps grossiers) et ne regarde <strong>jamais</strong>
+<code class="inl">t_dtw</code> :</p>
+
+<pre><span class="fname">app/whisper.py — _tokens_to_words()  (lignes ~100-102)</span>off = tok.<span class="fn">get</span>(<span class="str">"offsets"</span>, {})
+t0 = off.<span class="fn">get</span>(<span class="str">"from"</span>, <span class="num">0</span>) / <span class="num">1000.0</span>   <span class="com"># ← temps GROSSIER (décodeur)</span>
+t1 = off.<span class="fn">get</span>(<span class="str">"to"</span>, off.<span class="fn">get</span>(<span class="str">"from"</span>, <span class="num">0</span>)) / <span class="num">1000.0</span>
+<span class="com"># t_dtw n'est lu NULLE PART dans tout le fichier.</span></pre>
+
+<p>Ensuite, <code class="inl">_fit_words_to_segment()</code> prend ces temps grossiers et les
+<strong>redistribue proportionnellement</strong> à l'intérieur du segment (transformation affine),
+en <strong>forçant</strong> le premier mot sur <code class="inl">seg_start</code> et le dernier sur
+<code class="inl">seg_end</code> :</p>
+
+<pre><span class="fname">app/whisper.py — _fit_words_to_segment()  (le « rattrapage »)</span><span class="kw">span</span>  = raw_end - raw_start
+scale = seg_span / span
+<span class="kw">for</span> w <span class="kw">in</span> words:
+    w.start = seg_start + (w.start - raw_start) * scale   <span class="com"># étale les temps grossiers</span>
+...
+w.end = words[i + <span class="num">1</span>].start   <span class="com"># fin d'un mot = début du suivant (pas de trou)</span></pre>
+
+<p>C'est là que ton symptôme naît, mécaniquement :</p>
+<ul>
+  <li>Le <strong>1<sup>er</sup> et le dernier mot</strong> sont épinglés aux bornes du segment →
+      <span class="pill p-good">le bloc a l'air calé</span></li>
+  <li>Les <strong>mots du milieu</strong> sont placés selon des proportions issues de données peu fiables →
+      <span class="pill p-bad">position perçue comme aléatoire</span></li>
+</ul>
+<p>Cette fonction est un <em>pansement</em> écrit pour compenser des temps grossiers. Mais on n'en a pas
+besoin : les vrais temps existent déjà dans <code class="inl">t_dtw</code>. On rafistole une donnée
+qu'on aurait juste dû lire correctement.</p>
+
+<h2>4. Pourquoi les autres éditeurs y arrivent</h2>
+<p>Opus.pro, Submagic, Veed & co ne font pas de magie — ils utilisent une des deux approches, et nous
+sommes à un tout petit pas de la première :</p>
+<table>
+  <thead><tr><th>Approche</th><th>Ce que c'est</th><th>Nous</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Lire le DTW de Whisper</strong></td>
+      <td>Utiliser directement les horodatages alignés (<code class="inl">t_dtw</code> / ce que fait <em>whisper-timestamped</em>).</td>
+      <td><span class="pill p-warn">On les calcule mais on ne les lit pas</span></td>
+    </tr>
+    <tr>
+      <td><strong>Alignement forcé dédié</strong></td>
+      <td><em>WhisperX</em> : un 2<sup>e</sup> modèle (wav2vec2, CTC) réaligne phonétiquement le texte sur l'audio. Précision maximale.</td>
+      <td><span class="pill p-bad">Pas encore fait</span></td>
+    </tr>
+  </tbody>
+</table>
+<p>Donc : <strong>ce n'est pas une limite de Whisper</strong>. C'est un champ non lu chez nous.</p>
+
+<h2>5. Le correctif</h2>
+<h3>Correctif principal — lire <code class="inl">t_dtw</code> en priorité</h3>
+<p>Une modification chirurgicale dans <code class="inl">_tokens_to_words()</code> : préférer
+<code class="inl">t_dtw</code> quand il est disponible (≥ 0), sinon retomber sur <code class="inl">offsets</code>.
+Attention aux unités : <code class="inl">t_dtw</code> est en <strong>centisecondes</strong>
+(÷ 100 → secondes), alors que <code class="inl">offsets</code> est en <strong>millisecondes</strong> (÷ 1000).</p>
+
+<div class="diff">
+  <div class="before">
+    <div class="hd">✗ Actuel — lit les temps grossiers</div>
+<pre><span class="rm">off = tok.<span class="fn">get</span>(<span class="str">"offsets"</span>, {})</span>
+<span class="rm">t0 = off.<span class="fn">get</span>(<span class="str">"from"</span>, <span class="num">0</span>) / <span class="num">1000.0</span></span>
+<span class="rm">t1 = off.<span class="fn">get</span>(<span class="str">"to"</span>,</span>
+<span class="rm">   off.<span class="fn">get</span>(<span class="str">"from"</span>, <span class="num">0</span>)) / <span class="num">1000.0</span></span>
+
+
+
+
+</pre>
+  </div>
+  <div class="after">
+    <div class="hd">✓ Corrigé — DTW prioritaire, repli sur offsets</div>
+<pre><span class="add">dtw = tok.<span class="fn">get</span>(<span class="str">"t_dtw"</span>, -<span class="num">1</span>)</span>
+off = tok.<span class="fn">get</span>(<span class="str">"offsets"</span>, {})
+<span class="add"><span class="kw">if</span> dtw <span class="kw">is not</span> <span class="kw">None</span> <span class="kw">and</span> dtw &gt;= <span class="num">0</span>:</span>
+<span class="add">    t0 = dtw / <span class="num">100.0</span>  <span class="com"># centisec → s</span></span>
+<span class="add">    t1 = t0        <span class="com"># fin recalculée</span></span>
+<span class="add"><span class="kw">else</span>:</span>
+    t0 = off.<span class="fn">get</span>(<span class="str">"from"</span>, <span class="num">0</span>) / <span class="num">1000.0</span>
+    t1 = off.<span class="fn">get</span>(<span class="str">"to"</span>,
+       off.<span class="fn">get</span>(<span class="str">"from"</span>, <span class="num">0</span>)) / <span class="num">1000.0</span></pre>
+  </div>
+</div>
+
+<p class="kbd">Note : <code class="inl">t_dtw</code> donne <strong>un point par token</strong> (le début du mot),
+pas une paire début/fin. C'est parfait ici — <code class="inl">_fit_words_to_segment()</code> recalcule
+déjà la fin de chaque mot comme « début du mot suivant ». On peut donc alléger cette fonction pour
+qu'elle <strong>respecte</strong> les temps DTW (simple <em>clamp</em> aux bornes + non-décroissance)
+au lieu de les ré-étaler par transformation affine.</p>
+
+<div class="card verdict warn">
+  <h3>⚠ À vérifier une fois le correctif en place</h3>
+  <ul style="margin-bottom:0">
+    <li>Que <code class="inl">t_dtw</code> n'est pas <code class="inl">-1</code> dans le JSON produit
+        (regarde <code class="inl">data/projects/&lt;id&gt;/…</code> ou un run de debug). S'il est toujours
+        à <code class="inl">-1</code>, c'est que le build de whisper.cpp n'a pas les têtes d'alignement
+        → il faudra reconstruire avec le support DTW.</li>
+    <li>Que le rendu (export) reste identique : les captions viennent du même
+        <code class="inl">CaptionBlock</code> partagé, donc corriger les temps corrige à la fois
+        l'aperçu <em>et</em> l'export, gratuitement.</li>
+  </ul>
+</div>
+
+<h3>Option supérieure (plus tard) — alignement forcé</h3>
+<p>Si après le correctif <code class="inl">t_dtw</code> tu veux la précision « pro » absolue (mots
+serrés type TikTok, robustes aux hésitations et à la musique), l'étape suivante est l'alignement forcé
+à la <strong>WhisperX</strong> : un passage <code class="inl">wav2vec2</code> (CTC) 100 % local qui recale
+chaque mot sur l'audio. Plus lourd (un 2<sup>e</sup> modèle, du VRAM), mais c'est le vrai plafond de
+qualité. À réserver si le DTW ne suffit pas.</p>
+
+<h2>6. Résumé</h2>
+<table>
+  <thead><tr><th>Question</th><th>Réponse</th></tr></thead>
+  <tbody>
+    <tr><td>Limite de Whisper&nbsp;?</td><td><span class="pill p-good">Non</span> — il calcule les bons temps (DTW activé).</td></tr>
+    <tr><td>Bug d'implémentation&nbsp;?</td><td><span class="pill p-bad">Oui</span> — on lit <code class="inl">offsets</code> au lieu de <code class="inl">t_dtw</code>.</td></tr>
+    <tr><td>Pourquoi le bloc est calé mais pas les mots&nbsp;?</td><td>La redistribution affine épingle les bornes et étale l'intérieur avec des temps grossiers.</td></tr>
+    <tr><td>Correctif minimal&nbsp;?</td><td>~6 lignes dans <code class="inl">app/whisper.py</code> : lire <code class="inl">t_dtw</code> (÷100), repli sur <code class="inl">offsets</code>.</td></tr>
+    <tr><td>Pour aller plus loin&nbsp;?</td><td>Alignement forcé WhisperX / wav2vec2 (local).</td></tr>
+  </tbody>
+</table>
+
+<p class="foot">Fichiers analysés : <code class="inl">app/whisper.py</code>, <code class="inl">app/config.py</code>,
+<code class="inl">app/pipeline.py</code>, <code class="inl">frontend/src/captions.ts</code>,
+<code class="inl">frontend/src/components/CaptionBlock.tsx</code>, et la source amont
+<code class="inl">whisper.cpp/examples/cli/cli.cpp</code>. Je n'ai modifié aucun fichier du projet —
+ce document est un diagnostic. Dis-moi si tu veux que j'applique le correctif <code class="inl">t_dtw</code>.</p>
+</div>

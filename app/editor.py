@@ -1,14 +1,18 @@
 """Editor projects API (upload, process, read, edit)."""
 from __future__ import annotations
 
+import subprocess
 import threading
 import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 
-from . import exports, media, pipeline, segments as segment_ops, store, subtitles, translate
+from . import (
+    exports, media, pipeline, render, segments as segment_ops, store,
+    subtitles, translate,
+)
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -47,6 +51,21 @@ def get_project(project_id: str) -> dict:
     if project is None:
         raise HTTPException(404, "Unknown project")
     return project
+
+
+@router.get("/{project_id}/transcript")
+def get_transcript(project_id: str) -> list[dict]:
+    """Compact, token-cheap view of the transcript: one row per segment with its
+    id, timecodes, text and translation (no per-word timings). An agent reasons
+    over this to pick clip boundaries; word-level timings stay in GET /{id}."""
+    project = store.get(project_id)
+    if project is None:
+        raise HTTPException(404, "Unknown project")
+    return [
+        {"id": s["id"], "start": s["start"], "end": s["end"],
+         "text": s["text"], "translation": s.get("translation", "")}
+        for s in project["segments"]
+    ]
 
 
 @router.delete("/{project_id}")
@@ -237,6 +256,41 @@ def get_video(project_id: str) -> FileResponse:
         raise HTTPException(404, "Video missing")
     # FileResponse honours Range requests, so the <video> element can seek.
     return FileResponse(path)
+
+
+@router.get("/{project_id}/frame")
+def get_frame(project_id: str, t: float, width: int = 480,
+              mode: str = "source") -> Response:
+    """A single JPEG of the video at time `t` (seconds) — the agent's "eyes".
+
+    mode="source" (default): the raw source frame, grabbed by ffmpeg — fast, no
+    browser needed, good for understanding *content*. mode="preview": the fully
+    composed output frame (captions + reframe + scenes) captured from the same
+    headless renderer as export — shows what the final clip will look like."""
+    project = store.get(project_id)
+    if project is None:
+        raise HTTPException(404, "Unknown project")
+
+    if mode == "preview":
+        try:
+            data = render.capture_frame(project, max(t, 0.0))
+        except RuntimeError as exc:
+            raise HTTPException(500, str(exc))
+        return Response(content=data, media_type="image/jpeg")
+
+    source = store.source_path(project)
+    if not source.exists():
+        raise HTTPException(404, "Video missing")
+    proc = subprocess.run(
+        ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+         "-ss", f"{max(t, 0.0):.3f}", "-i", str(source),
+         "-frames:v", "1", "-vf", f"scale={max(16, width)}:-2",
+         "-c:v", "mjpeg", "-f", "image2", "pipe:1"],
+        capture_output=True,
+    )
+    if proc.returncode != 0 or not proc.stdout:
+        raise HTTPException(500, proc.stderr.decode("utf-8", "replace")[-400:])
+    return Response(content=proc.stdout, media_type="image/jpeg")
 
 
 # --- clip export / render ---------------------------------------------------

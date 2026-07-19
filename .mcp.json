@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "transcript": {
+      "command": "/home/clement/transcript/.venv/bin/python",
+      "args": ["-m", "mcp_server"],
+      "env": {
+        "TRANSCRIPT_API": "http://localhost:8000",
+        "PYTHONPATH": "/home/clement/transcript"
+      }
+    }
+  }
+}

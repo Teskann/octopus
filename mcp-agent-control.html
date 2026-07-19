@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Piloter l'éditeur vidéo depuis Claude Code — Plan MCP</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1216; --panel:#171b21; --panel2:#1d222a; --border:#2a313b;
+    --text:#e6e9ee; --muted:#9aa4b2; --accent:#7c9cff; --accent2:#5ee6b8;
+    --warn:#ffcf6b; --danger:#ff8080; --add:#123524; --add-b:#1f6f43;
+    --del:#3a1420; --del-b:#7a2338; --code:#1a1f27;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font-size:19px; line-height:1.65;
+  }
+  .wrap{max-width:1080px; margin:0 auto; padding:56px 28px 120px}
+  header.hero{
+    background:linear-gradient(135deg,#1b2130,#12161d 60%);
+    border:1px solid var(--border); border-radius:18px; padding:38px 40px; margin-bottom:40px;
+  }
+  header.hero h1{margin:0 0 10px; font-size:2.15rem; line-height:1.2}
+  header.hero p{margin:0; color:var(--muted); font-size:1.1rem; max-width:78ch}
+  .tag{display:inline-block; background:var(--panel2); border:1px solid var(--border);
+    color:var(--accent2); font-size:.8rem; letter-spacing:.06em; text-transform:uppercase;
+    padding:4px 12px; border-radius:999px; margin-bottom:18px; font-weight:600}
+  h2{font-size:1.55rem; margin:52px 0 14px; padding-bottom:10px; border-bottom:1px solid var(--border)}
+  h3{font-size:1.2rem; margin:32px 0 10px; color:#fff}
+  h2 .num{color:var(--accent); font-variant-numeric:tabular-nums; margin-right:12px}
+  p{margin:14px 0}
+  a{color:var(--accent); text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{font-family:"SF Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.9em}
+  p code,li code,td code{background:var(--code); border:1px solid var(--border);
+    padding:1px 6px; border-radius:6px; color:#d5e0ff}
+  pre{background:var(--code)!important; border:1px solid var(--border); border-radius:12px;
+    padding:18px 20px; overflow:auto; font-size:.86rem; line-height:1.5; margin:18px 0}
+  pre code{background:none!important; border:none; padding:0}
+  .callout{border-radius:12px; padding:16px 20px; margin:20px 0; border:1px solid var(--border);
+    background:var(--panel)}
+  .callout.info{border-left:4px solid var(--accent)}
+  .callout.warn{border-left:4px solid var(--warn)}
+  .callout.good{border-left:4px solid var(--accent2)}
+  .callout b{color:#fff}
+  table{width:100%; border-collapse:collapse; margin:20px 0; font-size:.92rem}
+  th,td{text-align:left; padding:10px 12px; border-bottom:1px solid var(--border); vertical-align:top}
+  th{color:var(--muted); font-weight:600; font-size:.82rem; text-transform:uppercase; letter-spacing:.04em}
+  tr:hover td{background:#141922}
+  .pill{font-size:.72rem; font-weight:700; padding:2px 8px; border-radius:6px; white-space:nowrap}
+  .pill.get{background:#16324a; color:#8ec5ff}
+  .pill.post{background:#153a2b; color:#7ff0c0}
+  .pill.patch{background:#3a3116; color:#ffe08a}
+  .pill.del{background:#40202a; color:#ff9db0}
+  .pill.new{background:#3a1650; color:#e2a9ff}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:0; border:1px solid var(--border);
+    border-radius:12px; overflow:hidden; margin:20px 0}
+  .grid2 .col{padding:0}
+  .grid2 .col h4{margin:0; padding:10px 16px; font-size:.82rem; letter-spacing:.05em;
+    text-transform:uppercase; color:var(--muted); background:var(--panel2); border-bottom:1px solid var(--border)}
+  .grid2 .col.before h4{color:#ff9db0}
+  .grid2 .col.after h4{color:#7ff0c0}
+  .grid2 .col:first-child{border-right:1px solid var(--border)}
+  .diff{margin:0; border:none; border-radius:0; font-size:.8rem; white-space:pre; background:var(--code)}
+  .diff .ln{display:block; padding:0 16px}
+  .diff .add{background:var(--add); box-shadow:inset 3px 0 0 var(--add-b)}
+  .diff .del{background:var(--del); box-shadow:inset 3px 0 0 var(--del-b)}
+  .steps{counter-reset:step; list-style:none; padding:0}
+  .steps li{position:relative; padding:4px 0 20px 52px; margin:0}
+  .steps li::before{counter-increment:step; content:counter(step);
+    position:absolute; left:0; top:0; width:34px; height:34px; border-radius:50%;
+    background:var(--panel2); border:1px solid var(--accent); color:var(--accent);
+    display:flex; align-items:center; justify-content:center; font-weight:700; font-size:.95rem}
+  .steps li:not(:last-child)::after{content:""; position:absolute; left:17px; top:34px; bottom:0;
+    width:1px; background:var(--border)}
+  .arch{display:flex; flex-direction:column; gap:14px; margin:24px 0}
+  .arch .row{display:flex; align-items:center; gap:16px; flex-wrap:wrap}
+  .box{background:var(--panel); border:1px solid var(--border); border-radius:12px;
+    padding:14px 18px; flex:1; min-width:200px}
+  .box .t{font-weight:700; color:#fff}
+  .box .s{color:var(--muted); font-size:.85rem}
+  .box.hl{border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset}
+  .flow{color:var(--accent); font-size:1.6rem; text-align:center}
+  .check{list-style:none; padding:0}
+  .check li{padding:8px 0 8px 34px; position:relative}
+  .check li::before{content:"☐"; position:absolute; left:0; color:var(--accent2); font-size:1.2rem}
+  .toc{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:20px 26px; margin:28px 0}
+  .toc ol{margin:8px 0 0; padding-left:22px; columns:2; column-gap:40px}
+  .toc a{color:var(--text)}
+  .muted{color:var(--muted)}
+  footer{margin-top:60px; padding-top:24px; border-top:1px solid var(--border); color:var(--muted); font-size:.9rem}
+  .kbd{background:#0b0e12; border:1px solid var(--border); border-bottom-width:2px; border-radius:6px;
+    padding:1px 7px; font-size:.85em; font-family:monospace}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="tag">Plan technique · MCP + Agent</div>
+  <h1>Piloter l'éditeur vidéo depuis Claude Code</h1>
+  <p>Comment exposer <b>toutes les commandes de l'éditeur</b> (transcription, sous-titres,
+  clips, cadrage, scènes, styles/presets, overlays, export) sous forme d'une <b>API MCP</b>,
+  plus la vision (transcription horodatée + captures d'écran à un timecode), pour qu'un agent
+  comme Claude Code repère lui-même les meilleures séquences et fabrique les clips.</p>
+</header>
+
+<div class="callout good">
+<b>✅ Statut : implémenté dans le dépôt.</b> Les deux endpoints backend
+(<code>GET /{id}/frame</code>, <code>GET /{id}/transcript</code>), l'endpoint des presets
+intégrés (<code>GET /api/presets/builtin</code>), le mode <b>capture composée</b>
+(<code>?mode=preview</code>), le <b>serveur MCP</b> (<code>mcp_server/</code>, 29 outils),
+le <code>.mcp.json</code> et la <b>bannière de rechargement</b> de l'éditeur sont écrits et
+testés (endpoints + pont MCP validés bout-à-bout avec une vraie vidéo). Reste à votre charge :
+<code>pip install "mcp[cli]"</code>, vérifier <span class="kbd">/mcp</span>, et lancer l'app.
+Ce document décrit la conception et sert de mode d'emploi.
+</div>
+
+<div class="toc">
+  <b>Sommaire</b>
+  <ol>
+    <li><a href="#idee">L'idée &amp; le résultat visé</a></li>
+    <li><a href="#archi">L'architecture recommandée</a></li>
+    <li><a href="#surface">La surface de contrôle existante</a></li>
+    <li><a href="#gaps">Ce qu'il faut ajouter au backend</a></li>
+    <li><a href="#serveur">Le serveur MCP &amp; son catalogue d'outils</a></li>
+    <li><a href="#code">Squelette du serveur MCP</a></li>
+    <li><a href="#brancher">Brancher Claude Code</a></li>
+    <li><a href="#workflow">Exemple de session agent</a></li>
+    <li><a href="#gotchas">Pièges &amp; limites</a></li>
+    <li><a href="#checklist">Votre checklist</a></li>
+  </ol>
+</div>
+
+<h2 id="idee"><span class="num">1</span>L'idée &amp; le résultat visé</h2>
+<p>Aujourd'hui, tout l'état d'un projet (segments horodatés au mot, style de sous-titres,
+cadrage, scènes, coupes, overlays, clips) vit dans un <code>project.json</code> et est déjà
+modifiable via une API REST FastAPI. L'éditeur React n'est qu'un client de cette API.</p>
+<p><b>Conséquence heureuse :</b> pour donner « le clavier » à un agent, il n'y a
+<i>presque rien à réécrire</i>. Il suffit d'emballer l'API REST dans un <b>serveur MCP</b>
+(le protocole que Claude Code parle pour appeler des outils) et d'ajouter <b>deux</b> capacités
+qui manquent aujourd'hui : une <b>lecture compacte de la transcription</b> et une
+<b>capture d'image à un timecode</b> (la « vision » de l'agent).</p>
+
+<div class="callout good">
+<b>Ce que l'agent pourra faire, en langage naturel :</b> « Lis la transcription, trouve les
+5 passages les plus percutants, crée un clip pour chacun (bornes au mot près), corrige les
+fautes d'orthographe et les erreurs de contexte de Whisper, applique le preset <i>Bold Anton</i>,
+recadre en 9:16, puis exporte. » — chaque phrase devient un ou plusieurs appels d'outils MCP.
+</div>
+
+<h2 id="archi"><span class="num">2</span>L'architecture recommandée</h2>
+<p>Le point clé de conception : le serveur MCP doit être un <b>client HTTP mince</b> vers le
+FastAPI déjà lancé (<code>:8000</code>), <b>pas</b> un second processus qui importe
+<code>app.store</code> directement.</p>
+
+<div class="arch">
+  <div class="row">
+    <div class="box hl"><div class="t">Claude Code</div><div class="s">L'agent — raisonne, décide des découpes, appelle les outils</div></div>
+    <div class="flow">→</div>
+    <div class="box hl"><div class="t">Serveur MCP <code>transcript</code></div><div class="s">stdio · traduit outils ⇄ appels HTTP</div></div>
+  </div>
+  <div class="row">
+    <div class="flow" style="flex:0 0 auto;margin-left:auto">↓ HTTP <code>localhost:8000</code></div>
+  </div>
+  <div class="row">
+    <div class="box"><div class="t">FastAPI <code>app/</code></div><div class="s">API REST + cache mémoire + <code>project.json</code> (source de vérité)</div></div>
+    <div class="flow">↔</div>
+    <div class="box"><div class="t">Éditeur React <code>:5173</code></div><div class="s">l'humain — même API, en parallèle</div></div>
+  </div>
+</div>
+
+<div class="callout warn">
+<b>Pourquoi passer par HTTP et pas importer <code>store</code> ?</b> <code>app/store.py</code>
+garde un <b>cache projet en mémoire</b> (« <i>single uvicorn worker</i> ») protégé par un
+verrou. Un serveur MCP séparé qui lirait/écrirait <code>project.json</code> en direct aurait
+son <b>propre cache</b> : les deux processus se marcheraient dessus (l'un écrase les écritures
+de l'autre). En parlant au FastAPI par HTTP, il n'y a qu'un seul cache, qu'un seul chemin
+d'écriture, et toute la logique (migrations, re-timing des mots, validations) est réutilisée
+telle quelle.
+</div>
+
+<h2 id="surface"><span class="num">3</span>La surface de contrôle existante</h2>
+<p>La quasi-totalité de ce que l'utilisateur fait dans l'UI correspond déjà à un endpoint.
+Voici la carte « contrôle UI → API » que le serveur MCP va exposer.</p>
+
+<table>
+  <thead><tr><th>Contrôle dans l'UI</th><th>Endpoint / champ</th><th>Méthode</th></tr></thead>
+  <tbody>
+    <tr><td>Lister / ouvrir / renommer / supprimer un projet</td><td><code>/api/projects</code>, <code>/{id}</code> (champ <code>name</code>)</td><td><span class="pill get">GET</span> <span class="pill patch">PATCH</span> <span class="pill del">DEL</span></td></tr>
+    <tr><td>Importer une vidéo (déclenche transcription)</td><td><code>/api/projects</code> (upload)</td><td><span class="pill post">POST</span></td></tr>
+    <tr><td>Transcription + timecodes au mot</td><td><code>/{id}</code> → <code>segments[].words[]</code></td><td><span class="pill get">GET</span></td></tr>
+    <tr><td>Éditer un sous-titre (texte / trad / bornes)</td><td><code>/{id}/segments/{sid}</code></td><td><span class="pill patch">PATCH</span></td></tr>
+    <tr><td>Couper / fusionner / supprimer un segment</td><td><code>/{id}/segments/{sid}/split·/merge</code>, <span class="pill del">DEL</span></td><td><span class="pill post">POST</span></td></tr>
+    <tr><td>Style de légende (police, taille, couleurs, contour, boîte, position, marge, MAJ, karaoké, wrap, trad…)</td><td><code>/{id}</code> champ <code>style</code> (≈27 réglages)</td><td><span class="pill patch">PATCH</span></td></tr>
+    <tr><td>Presets (lister / enregistrer / supprimer)</td><td><code>/api/presets</code></td><td><span class="pill get">GET</span> <span class="pill post">POST</span> <span class="pill del">DEL</span></td></tr>
+    <tr><td>Cadrage : ratio + fenêtre de crop + mode + fond flou</td><td><code>/{id}</code> champ <code>frame</code></td><td><span class="pill patch">PATCH</span></td></tr>
+    <tr><td>Scènes / B-roll : importer, supprimer, crop par scène</td><td><code>/{id}/scenes</code>, champ <code>scenes</code></td><td><span class="pill post">POST</span> <span class="pill del">DEL</span> <span class="pill patch">PATCH</span></td></tr>
+    <tr><td>Changement de scène à un instant t</td><td><code>/{id}</code> champ <code>scene_cuts</code></td><td><span class="pill patch">PATCH</span></td></tr>
+    <tr><td>Overlays texte / image</td><td><code>/{id}</code> champ <code>overlays</code> ; <code>/{id}/assets</code></td><td><span class="pill patch">PATCH</span> <span class="pill post">POST</span></td></tr>
+    <tr><td>Créer / modifier des <b>clips</b></td><td><code>/{id}</code> champ <code>clips</code></td><td><span class="pill patch">PATCH</span></td></tr>
+    <tr><td>Traduire</td><td><code>/{id}/translate</code></td><td><span class="pill post">POST</span></td></tr>
+    <tr><td>Exporter des clips + suivre/télécharger</td><td><code>/{id}/renders</code>, <code>/{job}/file</code></td><td><span class="pill post">POST</span> <span class="pill get">GET</span></td></tr>
+    <tr><td>Transcription compacte (peu de tokens)</td><td><code>/{id}/transcript</code></td><td><span class="pill post">FAIT</span></td></tr>
+    <tr><td>Capture d'écran à un timecode (source + rendu composé)</td><td><code>/{id}/frame?t=…&amp;mode=source|preview</code></td><td><span class="pill post">FAIT</span></td></tr>
+  </tbody>
+</table>
+
+<div class="callout info">
+<b>« Tout texte, bouton, combobox »</b> : les <i>combobox</i> et <i>sliders</i> de style/cadrage
+sont des champs de <code>style</code>/<code>frame</code> ; les <i>boutons d'action</i> (Traduire,
+Exporter) sont des endpoints <code>POST</code>. La couverture est donc quasi complète —
+seules la <b>lecture compacte</b> et la <b>vision</b> manquent.
+</div>
+
+<h2 id="gaps"><span class="num">4</span>Ce qu'il faut ajouter au backend</h2>
+<p>Deux petits endpoints dans <code>app/editor.py</code>. Rien d'autre côté serveur.</p>
+
+<h3>4.1 — Capture d'image à un timecode (la « vision » de l'agent)</h3>
+<p>Un <code>GET</code> qui renvoie une image JPEG de la vidéo source à l'instant <code>t</code>,
+extraite par <code>ffmpeg</code> (déjà une dépendance). C'est ce qui permet à l'agent de
+<i>voir</i> le contenu à un moment donné : repérer un temps fort visuel, vérifier un cadrage,
+confirmer qui parle.</p>
+
+<div class="grid2">
+  <div class="col before"><h4>Avant — pas de capture</h4>
+    <pre class="diff"><code><span class="ln">@router.get("/{project_id}/video")</span>
+<span class="ln">def get_video(project_id: str) -> FileResponse:</span>
+<span class="ln">    project = store.get(project_id)</span>
+<span class="ln">    ...</span>
+<span class="ln"> </span>
+<span class="ln"> </span>
+<span class="ln"> </span>
+<span class="ln"> </span></code></pre>
+  </div>
+  <div class="col after"><h4>Après — nouvel endpoint <code>/frame</code></h4>
+    <pre class="diff"><code><span class="ln">import subprocess</span>
+<span class="ln">from fastapi.responses import Response</span>
+<span class="ln add">@router.get("/{project_id}/frame")</span>
+<span class="ln add">def get_frame(project_id: str, t: float,</span>
+<span class="ln add">              width: int = 480) -> Response:</span>
+<span class="ln add">    project = store.get(project_id)</span>
+<span class="ln add">    if project is None:</span>
+<span class="ln add">        raise HTTPException(404, "Unknown project")</span>
+<span class="ln add">    src = store.source_path(project)</span>
+<span class="ln add">    proc = subprocess.run(</span>
+<span class="ln add">        ["ffmpeg","-y","-hide_banner","-loglevel","error",</span>
+<span class="ln add">         "-ss", f"{max(t,0):.3f}", "-i", str(src),</span>
+<span class="ln add">         "-frames:v","1","-vf",f"scale={width}:-2",</span>
+<span class="ln add">         "-c:v","mjpeg","-f","image2","pipe:1"],</span>
+<span class="ln add">        capture_output=True)</span>
+<span class="ln add">    if proc.returncode or not proc.stdout:</span>
+<span class="ln add">        raise HTTPException(500, proc.stderr[-400:].decode())</span>
+<span class="ln add">    return Response(proc.stdout, media_type="image/jpeg")</span></code></pre>
+  </div>
+</div>
+
+<div class="callout info">
+<b>Deux variantes possibles.</b> Ci-dessus = <b>image source brute</b> (rapide, idéale pour
+« comprendre » le contenu). Si vous voulez que l'agent voie <b>exactement le rendu final</b>
+(sous-titres + recadrage + scènes), on peut réutiliser l'infra d'export : ouvrir la route
+<code>?render=1</code> dans Chrome headless, appeler <code>window.__render.seek(t)</code> et
+screenshot — même mécanisme que <code>app/render.py</code>, mais une seule frame. C'est plus
+lourd (Chrome + Vite requis) ; commencez par la frame source, ajoutez le rendu composité plus
+tard si besoin.
+</div>
+
+<h3>4.2 — Transcription compacte (économie de tokens)</h3>
+<p><code>GET /{id}</code> renvoie tout le projet, y compris chaque mot horodaté — vite
+volumineux. Un endpoint dédié renvoie juste ce dont l'agent a besoin pour raisonner sur le
+découpage.</p>
+<pre><code class="language-python">@router.get("/{project_id}/transcript")
+def get_transcript(project_id: str) -> list[dict]:
+    project = store.get(project_id)
+    if project is None:
+        raise HTTPException(404, "Unknown project")
+    return [
+        {"id": s["id"], "start": s["start"], "end": s["end"],
+         "text": s["text"], "translation": s.get("translation", "")}
+        for s in project["segments"]
+    ]</code></pre>
+<p class="muted">Les timecodes au mot restent accessibles via <code>GET /{id}</code> quand
+l'agent veut des bornes de clip au mot près.</p>
+
+<h2 id="serveur"><span class="num">5</span>Le serveur MCP &amp; son catalogue d'outils</h2>
+<p>Un nouveau paquet Python (ex. <code>mcp_server/</code>) qui déclare des outils MCP, chacun
+faisant un appel HTTP au FastAPI. Voici le catalogue proposé — pensé pour l'agent, donc
+<b>granulaire</b> (créer <i>un</i> clip, corriger <i>un</i> sous-titre) plutôt que « patche ce gros
+JSON ». Le serveur fait le <i>read-modify-write</i> des tableaux (<code>clips</code>,
+<code>overlays</code>, <code>scene_cuts</code>) pour vous.</p>
+
+<table>
+  <thead><tr><th>Outil MCP</th><th>Arguments</th><th>Rôle</th></tr></thead>
+  <tbody>
+    <tr><td><code>list_projects</code></td><td>—</td><td>Lister les projets (id, nom, statut, durée).</td></tr>
+    <tr><td><code>get_project</code></td><td><code>project_id</code></td><td>État complet (style, frame, clips, scènes…).</td></tr>
+    <tr><td><code>get_transcript</code></td><td><code>project_id</code></td><td>Segments horodatés compacts (raisonner sur le découpage).</td></tr>
+    <tr><td><code>get_frame</code> 👁</td><td><code>project_id, t, [width]</code></td><td>Renvoie une <b>image</b> de la vidéo à l'instant t.</td></tr>
+    <tr><td><code>edit_segment</code></td><td><code>project_id, segment_id, [text], [translation], [start], [end]</code></td><td>Corriger orthographe / contexte / bornes d'un sous-titre.</td></tr>
+    <tr><td><code>split_segment</code> / <code>merge_segment</code> / <code>delete_segment</code></td><td><code>project_id, segment_id, [word_index]</code></td><td>Restructurer les sous-titres.</td></tr>
+    <tr><td><code>create_clip</code></td><td><code>project_id, start, end, [name]</code></td><td>Créer un clip (bornes au mot près).</td></tr>
+    <tr><td><code>update_clip</code> / <code>delete_clip</code> / <code>list_clips</code></td><td><code>project_id, clip_id, …</code></td><td>Gérer les clips.</td></tr>
+    <tr><td><code>set_style</code></td><td><code>project_id, {champs style}</code></td><td>Modifier n'importe quel réglage de légende.</td></tr>
+    <tr><td><code>list_presets</code> / <code>apply_preset</code> / <code>save_preset</code></td><td><code>project_id, name</code></td><td>« Ouvrir un preset » = fusionner son style.</td></tr>
+    <tr><td><code>set_frame</code></td><td><code>project_id, [aspect], [x,y,w,h], [mode], [blur_bg]</code></td><td>Recadrer (9:16, 1:1…) et positionner la fenêtre.</td></tr>
+    <tr><td><code>list_scenes</code> / <code>add_scene_cut</code> / <code>clear_scene_cuts</code></td><td><code>project_id, time, scene_id</code></td><td>Basculer de caméra / B-roll à un instant.</td></tr>
+    <tr><td><code>add_text_overlay</code> / <code>add_image_overlay</code> / <code>delete_overlay</code></td><td><code>project_id, start, end, x, y, …</code></td><td>Poser un texte ou une image à l'écran.</td></tr>
+    <tr><td><code>translate</code></td><td><code>project_id, target</code></td><td>Lancer la traduction bilingue.</td></tr>
+    <tr><td><code>export_clips</code></td><td><code>project_id, [clip_ids]</code></td><td>Lancer le rendu MP4 (vide = tous).</td></tr>
+    <tr><td><code>render_status</code></td><td><code>project_id</code></td><td>Suivre l'avancement + chemins de téléchargement.</td></tr>
+  </tbody>
+</table>
+
+<div class="callout good">
+<b>Presets intégrés — fait.</b> Les 4 presets « d'usine » (<i>TikTok classique, Bold Anton,
+Boîte nette, Minimal doux</i>) sont désormais exposés côté serveur
+(<code>app/builtin_presets.py</code> → <code>GET /api/presets/builtin</code>), miroir de
+<code>frontend/src/presets.ts</code>. <code>apply_preset(name)</code> fusionne builtin +
+presets utilisateur, trouve par nom et <code>PATCH</code> le champ <code>style</code>.
+</div>
+
+<h2 id="code"><span class="num">6</span>Squelette du serveur MCP</h2>
+<p>Avec le SDK Python officiel (<code>pip install "mcp[cli]" httpx</code>) et
+<code>FastMCP</code>. Extrait représentatif — les autres outils suivent le même moule.</p>
+
+<pre><code class="language-python">"""mcp_server/__main__.py — pont MCP ⇄ API REST de l'éditeur.
+Lancer : python -m mcp_server   (Claude Code le lance en stdio)."""
+import os, httpx
+from mcp.server.fastmcp import FastMCP, Image
+
+API = os.environ.get("TRANSCRIPT_API", "http://localhost:8000")
+mcp = FastMCP("transcript")
+http = httpx.Client(base_url=API, timeout=60)
+
+# ---- lecture ---------------------------------------------------------------
+@mcp.tool()
+def list_projects() -> list[dict]:
+    """Liste les projets (id, nom, statut, durée)."""
+    return http.get("/api/projects").raise_for_status().json()
+
+@mcp.tool()
+def get_transcript(project_id: str) -> list[dict]:
+    """Segments horodatés compacts : id, start, end, text, translation."""
+    r = http.get(f"/api/projects/{project_id}/transcript")
+    return r.raise_for_status().json()
+
+@mcp.tool()
+def get_frame(project_id: str, t: float, width: int = 480) -> Image:
+    """Capture la frame de la vidéo à l'instant t (secondes). Renvoie une image."""
+    r = http.get(f"/api/projects/{project_id}/frame",
+                 params={"t": t, "width": width})
+    r.raise_for_status()
+    return Image(data=r.content, format="jpeg")
+
+# ---- édition des sous-titres ----------------------------------------------
+@mcp.tool()
+def edit_segment(project_id: str, segment_id: str, text: str | None = None,
+                 translation: str | None = None,
+                 start: float | None = None, end: float | None = None) -> dict:
+    """Corrige un sous-titre : orthographe/contexte (text), traduction, ou bornes.
+    Les timings au mot sont recalculés côté serveur quand `text` change."""
+    patch = {k: v for k, v in
+             {"text": text, "translation": translation,
+              "start": start, "end": end}.items() if v is not None}
+    r = http.patch(f"/api/projects/{project_id}/segments/{segment_id}", json=patch)
+    return r.raise_for_status().json()
+
+# ---- clips (read-modify-write du tableau `clips`) -------------------------
+@mcp.tool()
+def create_clip(project_id: str, start: float, end: float, name: str = "Clip") -> dict:
+    """Crée un clip [start, end] (secondes). Utilisez les bornes de mots pour être précis."""
+    proj = http.get(f"/api/projects/{project_id}").raise_for_status().json()
+    clip = {"id": os.urandom(6).hex(), "name": name,
+            "start": float(start), "end": float(end)}
+    clips = proj["clips"] + [clip]
+    http.patch(f"/api/projects/{project_id}", json={"clips": clips}).raise_for_status()
+    return clip
+
+# ---- style / presets ------------------------------------------------------
+@mcp.tool()
+def set_style(project_id: str, style: dict) -> dict:
+    """Fusionne des réglages de légende (font, font_size, highlight_color, position,
+    uppercase, box_enabled, translation_scale, max_lines, ...)."""
+    proj = http.get(f"/api/projects/{project_id}").raise_for_status().json()
+    merged = {**proj["style"], **style}
+    r = http.patch(f"/api/projects/{project_id}", json={"style": merged})
+    return r.raise_for_status().json()["style"]
+
+# ---- export ---------------------------------------------------------------
+@mcp.tool()
+def export_clips(project_id: str, clip_ids: list[str] | None = None) -> list[dict]:
+    """Lance le rendu MP4 des clips (liste vide = tous). Suivre avec render_status."""
+    r = http.post(f"/api/projects/{project_id}/renders",
+                  json={"clip_ids": clip_ids or []})
+    return r.raise_for_status().json()
+
+if __name__ == "__main__":
+    mcp.run()   # transport stdio par défaut</code></pre>
+
+<div class="callout good">
+<b>Bon réflexe :</b> des <i>docstrings</i> claires sur chaque <code>@mcp.tool()</code> — c'est
+ce que l'agent lit pour choisir l'outil. Décrivez les unités (secondes), les effets de bord
+(recalcul des timings), et quand utiliser quoi (« bornes de mots pour être précis »).
+</div>
+
+<h2 id="brancher"><span class="num">7</span>Brancher Claude Code</h2>
+<p>Déclarez le serveur MCP pour ce dépôt. Le plus simple, un fichier <code>.mcp.json</code> à
+la racine du projet (versionnable, partagé) :</p>
+<pre><code class="language-json">{
+  "mcpServers": {
+    "transcript": {
+      "command": "python",
+      "args": ["-m", "mcp_server"],
+      "env": { "TRANSCRIPT_API": "http://localhost:8000" }
+    }
+  }
+}</code></pre>
+<p>Ou en une commande (scope projet) :</p>
+<pre><code class="language-bash">claude mcp add transcript --scope project \
+  --env TRANSCRIPT_API=http://localhost:8000 \
+  -- python -m mcp_server</code></pre>
+<p>Vérifiez le branchement dans une session : <span class="kbd">/mcp</span> liste le serveur
+<code>transcript</code> et ses outils. Les outils apparaissent sous le nom
+<code>mcp__transcript__&lt;outil&gt;</code>.</p>
+
+<div class="callout warn">
+<b>Prérequis à lancer avant l'agent :</b> le FastAPI doit tourner
+(<code>./scripts/run-app.sh</code> → <code>:8000</code>). Pour <i>exporter</i>, il faut aussi
+Vite (<code>:5173</code>) + Chrome (voir <code>scripts/setup-render.sh</code>), comme pour
+l'export manuel. Pour <i>seulement</i> découper/éditer/capturer, le FastAPI + ffmpeg suffisent.
+</div>
+
+<h2 id="workflow"><span class="num">8</span>Exemple de session agent</h2>
+<p>Ce que vous tapez à Claude Code, et ce qu'il fait derrière :</p>
+<div class="callout info" style="font-style:italic">
+« Ouvre mon dernier projet. Lis la transcription, repère les 3 moments les plus percutants
+(punchlines, retournements), et crée un clip de 20–40 s pour chacun avec des bornes propres.
+Corrige au passage les fautes de Whisper. Applique le preset <b>Bold Anton</b> et recadre en 9:16.
+Montre-moi une capture au milieu de chaque clip, puis exporte. »
+</div>
+<ol class="steps">
+  <li><code>list_projects</code> → prend le plus récent ; <code>get_transcript</code> pour lire tout le texte horodaté.</li>
+  <li>Raisonne sur les segments, choisit 3 fenêtres. Récupère les <code>words[]</code> via <code>get_project</code> pour caler <code>start/end</code> sur des frontières de mots.</li>
+  <li>Repère des coquilles évidentes → <code>edit_segment</code> (text corrigé ; les timings au mot sont recalculés).</li>
+  <li><code>create_clip</code> ×3 avec les bornes choisies.</li>
+  <li><code>apply_preset("Bold Anton")</code> puis <code>set_frame(aspect="9:16")</code>.</li>
+  <li><code>get_frame(t=milieu du clip)</code> ×3 → <b>voit</b> les images, vérifie le cadrage, ajuste <code>set_frame</code> si un visage est coupé.</li>
+  <li><code>export_clips</code> → puis <code>render_status</code> en boucle jusqu'aux MP4 téléchargeables.</li>
+</ol>
+
+<h2 id="gotchas"><span class="num">9</span>Pièges &amp; limites</h2>
+<ul>
+  <li><b>Rafraîchissement de l'UI — géré.</b> L'éditeur sonde le projet toutes les 5 s et,
+  s'il détecte un changement <i>externe</i> (l'agent édite via la même API), affiche une
+  bannière « Ce projet a été modifié en dehors de l'éditeur → Recharger / Ignorer ». La
+  détection compare le contenu serveur à vos éditions locales et n'alerte que sur un écart
+  <b>stable</b> (donc pas votre propre sauvegarde débouncée). « Recharger » réinitialise tout
+  l'état depuis le serveur.</li>
+  <li><b>Débounce inverse.</b> À l'inverse de l'humain (qui sauvegarde avec 400 ms de débounce),
+  l'agent écrit immédiatement via l'API. Évitez d'éditer <i>manuellement</i> le même projet en
+  même temps que l'agent : dernier écrivain gagne.</li>
+  <li><b>Un seul worker uvicorn.</b> Le cache mémoire n'existe que dans ce processus — c'est
+  précisément pourquoi le serveur MCP passe par HTTP (§2) et n'ouvre pas <code>project.json</code>
+  lui-même.</li>
+  <li><b>Coût en tokens.</b> Préférez <code>get_transcript</code> (compact) à <code>get_project</code>
+  pour raisonner ; ne tirez les <code>words[]</code> que quand des bornes précises sont requises.
+  Limitez la largeur des captures (<code>width=480</code>) — inutile de renvoyer du 1080p à l'agent.</li>
+  <li><b>Capture = source brute.</b> La v1 de <code>get_frame</code> montre la vidéo <i>avant</i>
+  sous-titres/recadrage. Pour juger le rendu final, ajoutez la variante « frame composée »
+  (Chrome headless, §4.1).</li>
+  <li><b>Autorisations.</b> Au premier lancement, Claude Code demande l'autorisation d'utiliser
+  chaque outil MCP. Vous pouvez pré-autoriser les outils <i>lecture seule</i>
+  (<code>list_*</code>, <code>get_*</code>) et garder une confirmation sur l'export.</li>
+</ul>
+
+<h2 id="checklist"><span class="num">10</span>Votre checklist</h2>
+<p><b>Déjà fait dans le dépôt</b> (rien à coder) :</p>
+<ul class="check" style="opacity:.9">
+  <li style="text-decoration:line-through">Endpoints <code>GET /{id}/frame</code> (source + <code>mode=preview</code>) et <code>GET /{id}/transcript</code>.</li>
+  <li style="text-decoration:line-through">Paquet <code>mcp_server/</code> (29 outils) — client HTTP mince vers <code>:8000</code>.</li>
+  <li style="text-decoration:line-through">Presets intégrés côté serveur (<code>app/builtin_presets.py</code> + <code>/api/presets/builtin</code>).</li>
+  <li style="text-decoration:line-through">Fichier <code>.mcp.json</code> à la racine ; <code>mcp[cli]</code> ajouté à <code>requirements.txt</code>.</li>
+  <li style="text-decoration:line-through">Bannière de rechargement de l'éditeur (sondage 5 s).</li>
+</ul>
+<p><b>À vous de jouer :</b></p>
+<ul class="check">
+  <li><code>pip install "mcp[cli]"</code> dans l'environnement du projet (<code>.venv</code>).</li>
+  <li><code>npm run build</code> (ou relancer Vite) pour prendre les changements frontend (RenderPage, bannière).</li>
+  <li>Lancer <code>./scripts/run-app.sh</code> (+ Vite/Chrome si export ou <code>mode=preview</code>) avant de solliciter l'agent.</li>
+  <li>Vérifier le branchement avec <span class="kbd">/mcp</span> (serveur <code>transcript</code>, 29 outils).</li>
+  <li>Tester : « <i>Liste mes projets et donne-moi une capture à 10 s du premier.</i> »</li>
+  <li>Optionnel plus tard : réutiliser un même navigateur entre captures <code>preview</code> (perf), encode VAAPI.</li>
+</ul>
+
+<footer>
+  Rapport généré pour le dépôt <code>transcript</code>. La conception décrite ici est
+  <b>implémentée</b> : <code>app/editor.py</code>, <code>app/render.py</code>,
+  <code>app/presets.py</code>, <code>app/builtin_presets.py</code>,
+  <code>frontend/src/RenderPage.tsx</code>, <code>frontend/src/components/Editor.tsx</code>,
+  <code>frontend/src/styles.css</code>, le paquet <code>mcp_server/</code>, <code>.mcp.json</code>
+  et <code>requirements.txt</code>. Backend + pont MCP testés bout-à-bout ; le frontend n'a pas
+  pu être compilé ici (pas de npm) — lancez <code>npm run build</code> pour le valider.
+</footer>
+
+</div>
+<script>hljs.highlightAll();</script>
+</body>
+</html>

@@ -14,11 +14,14 @@ export const api = {
   },
 
   async listProjects(): Promise<ProjectSummary[]> {
-    return json(await fetch("/api/projects"));
+    // no-store: these endpoints have no cache headers, and Firefox will otherwise
+    // serve a stale list — showing an old name after a rename, or a stale status
+    // that makes a ready project look like it "won't open" until a page refresh.
+    return json(await fetch("/api/projects", { cache: "no-store" }));
   },
 
   async getProject(id: string): Promise<Project> {
-    return json(await fetch(`/api/projects/${id}`));
+    return json(await fetch(`/api/projects/${id}`, { cache: "no-store" }));
   },
 
   async renameProject(id: string, name: string): Promise<Project> {

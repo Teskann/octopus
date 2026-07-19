@@ -49,6 +49,9 @@ export function Editor({ initial }: { initial: Project }) {
   const [sceneCuts, setSceneCuts] = useState<SceneCut[]>(initial.scene_cuts);
   const [selectedSceneId, setSelectedSceneId] = useState<string>("main");
   const [playing, setPlaying] = useState(false);
+  // Set when the project changed on disk from OUTSIDE this editor (e.g. an MCP
+  // agent), so we can offer a reload instead of silently diverging.
+  const [externalChange, setExternalChange] = useState(false);
   // Right-pane nav. `null` = panel collapsed (click the active tab to hide it).
   const [tab, setTab] = useState<"subtitles" | "overlays" | "clips" | "scenes" | null>("subtitles");
   const openTab = (name: "subtitles" | "overlays" | "clips" | "scenes") =>
@@ -120,6 +123,19 @@ export function Editor({ initial }: { initial: Project }) {
       v.removeEventListener("pause", off);
       v.removeEventListener("ended", off);
     };
+  }, []);
+
+  // Kick the decoder to paint the first frame on open. With HW-accelerated H.264
+  // decode (AMD/ROCm), a freshly-loaded <video> often stays black/frozen until
+  // currentTime is touched — the "black screen until I seek a few times" bug. A
+  // tiny one-time seek once the frame data is ready forces a decoded frame.
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const kick = () => { try { v.currentTime = v.currentTime + 0.001; } catch { /* ignore */ } };
+    if (v.readyState >= 2) kick();
+    else v.addEventListener("loadeddata", kick, { once: true });
+    return () => v.removeEventListener("loadeddata", kick);
   }, []);
 
   // Keyboard: Space = play/pause (never scroll the page), ←/→ = seek 5s.
@@ -365,6 +381,19 @@ export function Editor({ initial }: { initial: Project }) {
     setProject(p);
   }
 
+  // Full reload: also reset the locally-edited slices from the server. Used when
+  // accepting an external change (agent edits); discards any unsaved local edit.
+  async function reloadAll() {
+    const p = await api.getProject(project.id);
+    setProject(p);
+    setStyle(p.style);
+    setOverlays(p.overlays);
+    setClips(p.clips);
+    setFrame(p.frame);
+    setSceneCuts(p.scene_cuts);
+    setExternalChange(false);
+  }
+
   // Everything editable is auto-saved (debounced). `flush` forces every pending
   // edit to disk immediately — the export reads the saved project.json, so it
   // must all be persisted before a render starts.
@@ -416,8 +445,45 @@ export function Editor({ initial }: { initial: Project }) {
       ? { ...cropMap(frame), objectFit: "fill", maxWidth: "none", maxHeight: "none", opacity: stage ? 0 : 1, pointerEvents: "none" }
       : { opacity: stage ? 0 : 1, pointerEvents: stage ? "none" : "auto" };
 
+  // Poll for changes made outside this editor (the MCP agent writes via the same
+  // API). We compare the server's content to our live edits; a difference that is
+  // STABLE across two polls (so it isn't just our own debounced save landing)
+  // means the project was changed elsewhere → surface a reload banner.
+  useEffect(() => {
+    const sig = (p: Project, ov: Overlay[], cl: Clip[], sc: SceneCut[], st: Style, fr: Frame) =>
+      JSON.stringify({
+        name: p.name, style: st, frame: fr, overlays: ov, clips: cl, scene_cuts: sc,
+        scenes: p.scenes,
+        segments: p.segments.map((s) => [s.id, s.start, s.end, s.text, s.translation]),
+      });
+    const local = sig(project, overlays, clips, sceneCuts, style, frame);
+    let prevServer = "";
+    const id = window.setInterval(async () => {
+      let fresh: Project;
+      try {
+        fresh = await api.getProject(project.id);
+      } catch {
+        return;
+      }
+      const server = sig(fresh, fresh.overlays, fresh.clips, fresh.scene_cuts, fresh.style, fresh.frame);
+      if (server === local) setExternalChange(false);
+      else if (server === prevServer) setExternalChange(true);
+      prevServer = server;
+    }, 5000);
+    return () => window.clearInterval(id);
+  }, [project, overlays, clips, sceneCuts, style, frame]);
+
   return (
     <div className="editor">
+      {externalChange && (
+        <div className="ext-change-banner">
+          <span>✏️ Ce projet a été modifié en dehors de l'éditeur (agent).</span>
+          <div className="ext-change-actions">
+            <button className="btn sm" onClick={reloadAll}>Recharger</button>
+            <button className="link" onClick={() => setExternalChange(false)}>Ignorer</button>
+          </div>
+        </div>
+      )}
       {/* LEFT — the transcript, in its own scroll view (search + auto-follow). */}
       <aside className="transcript-pane">
         <TranscriptPanel

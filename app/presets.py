@@ -15,7 +15,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
-from . import config, store
+from . import builtin_presets, config, store
 
 router = APIRouter(prefix="/api/presets", tags=["presets"])
 
@@ -35,6 +35,13 @@ def _load() -> list[dict]:
 
 def _save(items: list[dict]) -> None:
     _PATH.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+@router.get("/builtin")
+def list_builtin_presets() -> list[dict]:
+    """The read-only, built-in looks (same as the frontend's). An agent applies
+    one by copying its `style` onto a project."""
+    return builtin_presets.BUILTIN_PRESETS
 
 
 @router.get("")

@@ -32,6 +32,54 @@ def _render_url(project_id: str, clip_id: str) -> str:
     return f"{base}/?render=1&project={project_id}&clip={clip_id}"
 
 
+def _frame_url(project_id: str) -> str:
+    """Render route in single-frame mode (no clip: the page mounts a virtual
+    whole-video clip and just waits to be seeked)."""
+    base = config.RENDER_BASE_URL.rstrip("/")
+    return f"{base}/?render=1&project={project_id}&frame=1"
+
+
+def capture_frame(project: dict, t: float, quality: int | None = None) -> bytes:
+    """Return one JPEG of the fully composed output (captions + reframe + scenes)
+    at time `t`, captured from the same headless renderer as export.
+
+    Raises RuntimeError on any failure (missing browser, page error)."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:  # pragma: no cover - setup guidance
+        raise RuntimeError(
+            "playwright n'est pas installé — lancez scripts/setup-render.sh "
+            "(pip install playwright && playwright install chrome)"
+        ) from exc
+
+    url = _frame_url(project["id"])
+    q = config.RENDER_JPEG_QUALITY if quality is None else quality
+    with sync_playwright() as pw:
+        browser = _launch_browser(pw)
+        try:
+            page = browser.new_page(device_scale_factor=1)
+            page.set_default_timeout(config.RENDER_PAGE_TIMEOUT_MS)
+            perr: list[str] = []
+            page.on("pageerror", lambda e: perr.append(str(e)))
+            page.goto(url, wait_until="domcontentloaded")
+            page.wait_for_function(
+                "window.__render && (window.__render.ready || window.__render.error)",
+                timeout=config.RENDER_READY_TIMEOUT_MS,
+            )
+            meta = page.evaluate("window.__render.error ? null : window.__render.meta")
+            if meta is None:
+                raise RuntimeError(
+                    page.evaluate("window.__render && window.__render.error")
+                    or (perr[-1] if perr else "erreur inconnue"))
+            w, h = int(meta["w"]), int(meta["h"])
+            page.set_viewport_size({"width": w, "height": h})
+            page.evaluate("(t) => window.__render.seek(t)", float(t))
+            return page.screenshot(type="jpeg", quality=q,
+                                   clip={"x": 0, "y": 0, "width": w, "height": h})
+        finally:
+            browser.close()
+
+
 # Real Chrome binaries a `channel="chrome"` install can leave around, tried as
 # an explicit executable when the channel lookup itself fails.
 _CHROME_PATHS = (
