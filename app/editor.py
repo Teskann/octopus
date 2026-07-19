@@ -283,6 +283,19 @@ def split_segment(project_id: str, segment_id: str, body: dict) -> list[dict]:
     return project["segments"]
 
 
+@router.post("/{project_id}/segments/split-sentences")
+def split_sentences(project_id: str) -> list[dict]:
+    """Cut every segment holding more than one sentence into one-sentence
+    segments. Clears translations on the pieces created (re-translate to refill).
+    Returns the new segment list."""
+    project = store.get(project_id)
+    if project is None:
+        raise HTTPException(404, "Unknown project")
+    project["segments"] = segment_ops.split_sentences(project["segments"])
+    store.save(project)
+    return project["segments"]
+
+
 @router.post("/{project_id}/segments/{segment_id}/merge")
 def merge_segment(project_id: str, segment_id: str) -> list[dict]:
     project = store.get(project_id)

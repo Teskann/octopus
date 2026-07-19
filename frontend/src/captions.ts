@@ -3,6 +3,14 @@ import type { Segment, Style, Word } from "./types";
 
 const REFERENCE_WIDTH = 1080; // widths are authored against this (matches backend)
 
+// Lead-in (seconds) subtracted when seeking/clipping to a segment's first word:
+// whisper's DTW word start lands slightly after the real attack, which would eat
+// the first syllable. There's normally a small pause before a new segment, so
+// backing off this much stays clear of the previous word. Clamped to >= 0.
+export const WORD_LEAD = 0.12;
+export const segmentSeekStart = (seg: { start: number; words: Word[] }): number =>
+  Math.max(0, (seg.words[0]?.start ?? seg.start) - WORD_LEAD);
+
 // Max silent gap (seconds) bridged across a *sentence boundary* by holding the
 // previous caption on screen instead of blanking it. Within one sentence we glue
 // regardless of the gap. See the glue pass below.

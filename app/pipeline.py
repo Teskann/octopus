@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from pathlib import Path
 
-from . import media, store, transcription, whisper
+from . import media, segments as segment_ops, store, transcription, whisper
 
 
 def _set(project: dict, **fields) -> None:
@@ -63,6 +63,10 @@ def process_project(project_id: str, language: str | None) -> None:
             d["id"] = f"s{i}"
             d["translation"] = ""
             seg_dicts.append(d)
+
+        # One sentence per caption: whisper often lumps several sentences into one
+        # segment — cut them apart at sentence boundaries.
+        seg_dicts = segment_ops.split_sentences(seg_dicts)
 
         _set(project, language=detected or (language or ""),
              segments=seg_dicts, progress=1.0, status="ready", message="Ready")

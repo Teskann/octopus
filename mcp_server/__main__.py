@@ -188,6 +188,16 @@ def split_segment(project_id: str, segment_id: str, word_index: int) -> list[dic
 
 
 @mcp.tool()
+def split_sentences(project_id: str) -> list[dict]:
+    """Cut every subtitle segment that contains more than one sentence into
+    one-sentence segments (splits at .?!… boundaries, word timings preserved).
+    Translations on the newly created pieces are cleared — re-translate to
+    refill. Returns the new segment list."""
+    return _call("POST",
+                 f"/api/projects/{project_id}/segments/split-sentences").json()
+
+
+@mcp.tool()
 def merge_segment(project_id: str, segment_id: str) -> list[dict]:
     """Merge a segment with the one after it."""
     return _call("POST",
@@ -298,6 +308,24 @@ def _segment(project_id: str, segment_id: str) -> dict:
     return _call("GET", f"/api/projects/{project_id}/segments/{segment_id}").json()
 
 
+# Lead-in (seconds) subtracted from a clip's first-word start so it never eats the
+# word's attack. Mirrors WORD_LEAD in frontend/src/captions.ts — keep in sync.
+WORD_LEAD = 0.12
+
+
+def _seg_start(seg: dict) -> float:
+    """Word-accurate clip start: the first word's start (whisper's segment
+    offset can sit ~1s earlier), minus a small lead-in, clamped to >= 0."""
+    words = seg.get("words") or []
+    base = float(words[0]["start"]) if words else float(seg["start"])
+    return max(0.0, base - WORD_LEAD)
+
+
+def _seg_end(seg: dict) -> float:
+    words = seg.get("words") or []
+    return float(words[-1]["end"]) if words else float(seg["end"])
+
+
 @mcp.tool()
 def create_clip_from_segments(project_id: str, start_segment_id: str,
                               end_segment_id: str = "", name: str = "Clip") -> dict:
@@ -309,8 +337,8 @@ def create_clip_from_segments(project_id: str, start_segment_id: str,
     Returns the created clip {id, name, start, end}."""
     a = _segment(project_id, start_segment_id)
     b = _segment(project_id, end_segment_id) if end_segment_id else a
-    start = min(float(a["start"]), float(b["start"]))
-    end = max(float(a["end"]), float(b["end"]))
+    start = min(_seg_start(a), _seg_start(b))
+    end = max(_seg_end(a), _seg_end(b))
     if end <= start:
         raise RuntimeError("Bornes de segment invalides (durée nulle).")
     proj = _project(project_id)
@@ -328,8 +356,8 @@ def retime_clip_to_segments(project_id: str, clip_id: str, start_segment_id: str
     back onto clean segment edges. Returns the updated clip."""
     a = _segment(project_id, start_segment_id)
     b = _segment(project_id, end_segment_id) if end_segment_id else a
-    start = min(float(a["start"]), float(b["start"]))
-    end = max(float(a["end"]), float(b["end"]))
+    start = min(_seg_start(a), _seg_start(b))
+    end = max(_seg_end(a), _seg_end(b))
     proj = _project(project_id)
     clips = proj.get("clips", [])
     hit = next((c for c in clips if c["id"] == clip_id), None)

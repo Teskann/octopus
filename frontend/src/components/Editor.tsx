@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { api } from "../api";
 import { usePlayhead } from "../usePlayhead";
-import { buildCues, activeCueIndex } from "../captions";
+import { buildCues, activeCueIndex, segmentSeekStart } from "../captions";
 import { CaptionBlock } from "./CaptionBlock";
 import { ContextPanel } from "./ContextPanel";
 import { StylePanel } from "./StylePanel";
@@ -470,8 +470,10 @@ export function Editor({
     setPendingClipStartId(null);
     if (!startSeg) return;
     // Bound the clip to the first/last word timestamps (frame-accurate), not the
-    // looser segment start/end, and handle segments picked in either order.
-    const wStart = (s: Segment) => (s.words.length ? s.words[0].start : s.start);
+    // looser segment start/end, and handle segments picked in either order. The
+    // start gets the same small lead-in as the click-seek so a clip never eats the
+    // first word's attack.
+    const wStart = (s: Segment) => segmentSeekStart(s);
     const wEnd = (s: Segment) => (s.words.length ? s.words[s.words.length - 1].end : s.end);
     createClip(Math.min(wStart(startSeg), wStart(seg)), Math.max(wEnd(startSeg), wEnd(seg)));
   }

@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { api } from "../api";
-import { isWordActive } from "../captions";
+import { isWordActive, segmentSeekStart } from "../captions";
 import { activeSceneId, segCutTime } from "../scenes";
 import { formatTime } from "../time";
 import type { Scene, SceneCut, Segment } from "../types";
@@ -41,13 +41,19 @@ const SegmentRow = memo(function SegmentRow({
   onSeek, onOpenMenu, onStartEdit, onCancelEdit, onDraftText, onDraftTrans,
   onSave, onSplit, onMerge, onDelete, onSceneCut,
 }: RowProps) {
+  // Seek to (just before) the first word, not seg.start: whisper's segment offset
+  // can sit up to ~1s before the first word, and the previous caption is "glued" on
+  // screen right up to that first word — so seeking to seg.start lands inside the
+  // previous cue (last word still highlighted) and makes clips start on a trailing
+  // phrase. The small lead-in (WORD_LEAD) avoids eating the word's attack.
+  const seekTarget = segmentSeekStart(seg);
   return (
     <div
       data-seg-id={seg.id}
       className={`seg ${active ? "active" : ""} ${editing ? "editing" : ""} ${isStart ? "clip-start" : ""}`}
       onContextMenu={(e) => onOpenMenu(e, seg)}
     >
-      <span className="ts" onClick={() => onSeek(seg.start)}>
+      <span className="ts" onClick={() => onSeek(seekTarget)}>
         {formatTime(seg.start)}
       </span>
 
@@ -82,7 +88,7 @@ const SegmentRow = memo(function SegmentRow({
         <span
           className="seg-text"
           title="Clic : aller à ce passage · double-clic : corriger"
-          onClick={() => onSeek(seg.start)}
+          onClick={() => onSeek(seekTarget)}
           onDoubleClick={() => onStartEdit(seg)}
         >
           {seg.words.length > 0

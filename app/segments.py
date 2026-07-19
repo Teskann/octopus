@@ -71,6 +71,68 @@ def split(segments: list[dict], seg_id: str, word_index: int) -> None:
     segments.insert(i + 1, new_seg)
 
 
+_SENT_END = ".?!…"
+_CLOSERS = "\"»)]'’”"
+
+
+def _ends_sentence(text: str) -> bool:
+    """True if `text` (a word) closes a sentence — ends in .?!… once trailing
+    quotes/brackets are stripped."""
+    return text.rstrip(_CLOSERS).rstrip()[-1:] in _SENT_END
+
+
+def _starts_sentence(text: str) -> bool:
+    """True if `text` (the next word) plausibly opens a new sentence — its first
+    letter is uppercase (or it's a digit / non-letter). Guards against splitting
+    on abbreviations like "etc." or "M." followed by a lowercase word."""
+    for ch in text:
+        if ch.isalpha():
+            return ch.isupper()
+        if ch.isdigit():
+            return True
+    return True
+
+
+def split_sentences(segments: list[dict]) -> list[dict]:
+    """Return a new segment list where no segment holds more than one sentence.
+
+    Each segment's words are cut wherever a word ends a sentence (.?!…) and the
+    following word opens a new one. Word timings are preserved 1:1; the extra
+    pieces get fresh ids and empty translations (the split invalidates a
+    translation that spanned several sentences)."""
+    out: list[dict] = []
+    for seg in segments:
+        words = seg.get("words") or []
+        if not words:
+            out.append(seg)
+            continue
+        pieces: list[list[dict]] = []
+        cur: list[dict] = []
+        for i, w in enumerate(words):
+            cur.append(w)
+            last = i == len(words) - 1
+            if _ends_sentence(w.get("text", "")) and (
+                last or _starts_sentence(words[i + 1].get("text", ""))
+            ):
+                pieces.append(cur)
+                cur = []
+        if cur:
+            pieces.append(cur)
+        if len(pieces) <= 1:
+            out.append(seg)
+            continue
+        for j, piece in enumerate(pieces):
+            out.append({
+                "id": seg["id"] if j == 0 else _new_id(),
+                "start": piece[0]["start"],
+                "end": piece[-1]["end"],
+                "text": " ".join(x["text"] for x in piece),
+                "translation": "",
+                "words": piece,
+            })
+    return out
+
+
 def merge_with_next(segments: list[dict], seg_id: str) -> None:
     """Merge a segment with the one after it."""
     i = find(segments, seg_id)
