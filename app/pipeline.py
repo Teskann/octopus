@@ -26,11 +26,15 @@ def process_project(project_id: str, language: str | None) -> None:
     wav_path = pdir / "audio.wav"
     try:
         _set(project, status="processing", progress=0.03, message="Preparing video…")
-        # One-time: move the moov atom to the front so the browser can stream the
-        # source (and play its audio) immediately instead of buffering the whole
-        # file first. Skipped on re-transcribe (the source is already optimized).
+        # One-time source normalisation, skipped on re-transcribe:
+        #  1. Transcode to H.264 if the codec isn't already (HEVC/H.265 plays in
+        #     the editor but exports as BLACK — the headless-Chrome renderer has no
+        #     HEVC decoder). ensure_h264 already writes a +faststart file.
+        #  2. Otherwise, move the moov atom to the front so the browser can stream
+        #     the source (and play its audio) immediately instead of buffering it.
         if not project.get("source_faststart"):
-            media.faststart_remux(video_path)
+            if not media.ensure_h264(video_path):
+                media.faststart_remux(video_path)
             _set(project, source_faststart=True)
 
         _set(project, progress=0.05, message="Reading video…")

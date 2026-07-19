@@ -77,6 +77,46 @@ def faststart_remux(path: Path) -> bool:
     return True
 
 
+def video_codec(path: Path) -> str:
+    """Name of the first video stream's codec (e.g. 'h264', 'hevc'), '' on failure."""
+    proc = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(path)],
+        capture_output=True, text=True,
+    )
+    return proc.stdout.strip() if proc.returncode == 0 else ""
+
+
+def ensure_h264(path: Path) -> bool:
+    """Transcode a video to H.264/AAC MP4 when it isn't already H.264.
+
+    The headless-Chrome renderer (Phase-5 export + the `mode=preview` frames) can
+    only decode **H.264** — open-source Chromium ships no HEVC/H.265 decoder, so an
+    HEVC source composites as an **all-black clip**. The catch: HEVC plays fine in
+    the editor (the user's real browser has hardware HEVC), so the source looks
+    healthy right up until export. Phones/cameras increasingly record HEVC, so we
+    normalise any non-H.264 source to H.264 at ingest. Re-encode (not a remux),
+    in place via a temp file, already `+faststart`. Returns True if transcoded,
+    False if already H.264 / not a probeable video / on ffmpeg failure (the
+    original is left untouched — playback still works in the editor).
+    """
+    codec = video_codec(path)
+    if not codec or codec == "h264":
+        return False
+    tmp = path.with_name(path.stem + ".h264" + path.suffix)
+    proc = subprocess.run(
+        ["ffmpeg", "-y", "-i", str(path),
+         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+         "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", str(tmp)],
+        capture_output=True, text=True,
+    )
+    if proc.returncode != 0 or not tmp.exists():
+        tmp.unlink(missing_ok=True)
+        return False
+    tmp.replace(path)
+    return True
+
+
 def has_audio(path: Path) -> bool:
     """True if the file has at least one audio stream."""
     proc = subprocess.run(

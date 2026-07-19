@@ -405,7 +405,10 @@ async def add_scene(project_id: str, file: UploadFile = File(...)) -> dict:
     with dest.open("wb") as fh:
         while chunk := await file.read(1 << 20):
             fh.write(chunk)
-    media.faststart_remux(dest)  # stream-friendly moov, like the source
+    # H.264 so the headless export renderer can decode it (HEVC → black clip);
+    # ensure_h264 already +faststarts, else make the moov stream-friendly.
+    if not media.ensure_h264(dest):
+        media.faststart_remux(dest)
     try:
         info = media.probe_video(dest)
         w, h = info.width, info.height
