@@ -443,14 +443,19 @@ def get_video(project_id: str) -> FileResponse:
 
 @router.get("/{project_id}/frame")
 def get_frame(project_id: str, t: float, width: int = 480,
-              mode: str = "source", scene: str = "main") -> Response:
+              mode: str = "source", scene: str = "main",
+              apply_crop: bool = True) -> Response:
     """A single JPEG of the video at time `t` (seconds) — the agent's "eyes".
 
-    mode="source" (default): the raw frame of scene `scene` (default the main
-    video), grabbed by ffmpeg — fast, no browser, good for understanding
-    *content*; use `scene` to peek at a secondary camera / B-roll angle.
+    mode="source" (default): the frame of scene `scene` (default the main video),
+    grabbed by ffmpeg — fast, no browser, good for understanding *content*; use
+    `scene` to peek at a secondary camera / B-roll angle. By default the scene's
+    output crop window is applied (main = the project `frame` window, secondary =
+    that scene's `crop`) so you see WHAT ACTUALLY APPEARS in the clip; pass
+    apply_crop=false for the raw uncropped frame (e.g. to choose a new crop).
     mode="preview": the fully composed output frame (captions + reframe + scenes)
-    captured from the same headless renderer as export — `scene` is ignored."""
+    captured from the same headless renderer as export — `scene`/`apply_crop`
+    ignored."""
     project = store.get(project_id)
     if project is None:
         raise HTTPException(404, "Unknown project")
@@ -462,15 +467,28 @@ def get_frame(project_id: str, t: float, width: int = 480,
             raise HTTPException(500, str(exc))
         return Response(content=data, media_type="image/jpeg")
 
-    path = store.scene_path(project, scene)
-    if path is None:
+    scene_obj = next((s for s in project.get("scenes", []) if s["id"] == scene), None)
+    if scene_obj is None:
         raise HTTPException(404, f"Unknown scene: {scene}")
+    path = store.project_dir(project_id) / scene_obj["filename"]
     if not path.exists():
         raise HTTPException(404, "Video missing")
+
+    vf = []
+    if apply_crop:
+        # The visible window is the project frame for the main scene, else the
+        # scene's own crop. Normalized (0..1) of the source frame.
+        win = project.get("frame", {}) if scene_obj.get("is_main") else scene_obj.get("crop", {})
+        x, y = float(win.get("x", 0.0)), float(win.get("y", 0.0))
+        w, h = float(win.get("w", 1.0)), float(win.get("h", 1.0))
+        if w < 0.999 or h < 0.999 or x > 0.001 or y > 0.001:
+            vf.append(f"crop=iw*{w:.6f}:ih*{h:.6f}:iw*{x:.6f}:ih*{y:.6f}")
+    vf.append(f"scale={max(16, width)}:-2")
+
     proc = subprocess.run(
         ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
          "-ss", f"{max(t, 0.0):.3f}", "-i", str(path),
-         "-frames:v", "1", "-vf", f"scale={max(16, width)}:-2",
+         "-frames:v", "1", "-vf", ",".join(vf),
          "-c:v", "mjpeg", "-f", "image2", "pipe:1"],
         capture_output=True,
     )

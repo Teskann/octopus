@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { formatTime as fmt } from "../time";
+import { useModal } from "./Modal";
 import type { Clip, RenderJob } from "../types";
 
 const round = (v: number) => Math.round(v * 10) / 10;
@@ -23,6 +24,7 @@ export function ClipPanel({
   flush: () => Promise<void>;
 }) {
   const clip = clips.find((c) => c.id === selectedId) || null;
+  const modal = useModal();
   const [jobs, setJobs] = useState<RenderJob[]>([]);
   const [busy, setBusy] = useState(false);
   const pollRef = useRef<number>();
@@ -59,7 +61,10 @@ export function ClipPanel({
       await flush();
       setJobs(await api.startRenders(projectId, ids));
     } catch (e) {
-      alert(`Échec de l'export : ${String(e)}`);
+      await modal.alert({
+        title: "Échec de l'export",
+        message: String(e),
+      });
     } finally {
       setBusy(false);
     }

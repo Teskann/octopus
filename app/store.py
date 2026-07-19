@@ -201,6 +201,7 @@ def list_projects() -> list[dict]:
         items.append({
             "id": p["id"], "name": p["name"], "status": p["status"],
             "duration": p["duration"], "created_at": p.get("created_at", ""),
+            "clip_count": len(p.get("clips", [])),
         })
     items.sort(key=lambda x: x["created_at"], reverse=True)
     return items

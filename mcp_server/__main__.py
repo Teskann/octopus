@@ -50,6 +50,19 @@ def list_projects() -> list[dict]:
 
 
 @mcp.tool()
+def find_projects(name: str) -> list[dict]:
+    """Resolve a project name to id(s): every project whose name contains `name`
+    (case-insensitive), newest first, with exact (case-insensitive) matches
+    listed first. Names here are NOT unique, so this returns all matches — prefer
+    it over scanning list_projects. Empty list = no match."""
+    q = name.strip().lower()
+    projs = _call("GET", "/api/projects").json()  # already newest-first
+    matches = [p for p in projs if q in p["name"].lower()]
+    matches.sort(key=lambda p: p["name"].lower() != q)  # stable: exact names first
+    return matches
+
+
+@mcp.tool()
 def get_project(project_id: str) -> dict:
     """Full project state: style, frame, scenes, scene_cuts, overlays, clips and
     segments WITH per-word timings (words[]). Use it when you need exact word
@@ -98,27 +111,34 @@ def get_segment(project_id: str, segment_id: str) -> dict:
 
 @mcp.tool()
 def get_frame(project_id: str, t: float, width: int = 480,
-             mode: str = "source", scene: str = "main") -> Image:
-    """See the video at time `t` (seconds). mode="source" = raw frame (fast,
-    understand content); mode="preview" = the composed output (captions + reframe
-    + scenes, needs Chrome/Vite like export). `width` applies to source mode.
-    `scene` (source mode) screenshots a specific camera/B-roll angle — id from
-    list_scenes, "main" = the primary video."""
+             mode: str = "source", scene: str = "main",
+             apply_crop: bool = True) -> Image:
+    """See the video at time `t` (seconds). mode="source" = fast ffmpeg frame
+    (understand content); mode="preview" = the composed output (captions + reframe
+    + scenes, needs Chrome/Vite like export). `scene` (source mode) picks a
+    camera/B-roll angle — id from list_scenes, "main" = primary. By default the
+    scene's output crop window is applied so you see WHAT ACTUALLY APPEARS in the
+    clip (main = the project frame window, secondary = the scene's crop); pass
+    apply_crop=false for the raw uncropped frame."""
     r = _call("GET", f"/api/projects/{project_id}/frame",
-              params={"t": t, "width": width, "mode": mode, "scene": scene})
+              params={"t": t, "width": width, "mode": mode, "scene": scene,
+                      "apply_crop": apply_crop})
     return Image(data=r.content, format="jpeg")
 
 
 @mcp.tool()
 def get_frames(project_id: str, times: list[float], width: int = 480,
-               mode: str = "source", scene: str = "main") -> list[Image]:
+               mode: str = "source", scene: str = "main",
+               apply_crop: bool = True) -> list[Image]:
     """Screenshot several timestamps at once (one round-trip instead of N). Images
     come back in the same order as `times`. Ideal for locating slide/shot
-    transitions or scanning a scene. Same `mode`/`scene` semantics as get_frame."""
+    transitions or scanning a scene. Same `mode`/`scene`/`apply_crop` semantics as
+    get_frame (crop window applied by default = what actually appears)."""
     frames: list[Image] = []
     for t in times:
         r = _call("GET", f"/api/projects/{project_id}/frame",
-                  params={"t": t, "width": width, "mode": mode, "scene": scene})
+                  params={"t": t, "width": width, "mode": mode, "scene": scene,
+                          "apply_crop": apply_crop})
         frames.append(Image(data=r.content, format="jpeg"))
     return frames
 
@@ -262,8 +282,10 @@ def get_clip_transcript(project_id: str, clip_id: str = "", format: str = "text"
 
 @mcp.tool()
 def create_clip(project_id: str, start: float, end: float, name: str = "Clip") -> dict:
-    """Create a clip covering [start, end] (seconds). For clean cuts, align start/
-    end to word boundaries from get_project (segment.words[].start / .end)."""
+    """⚠️ Raw-time API — PREFER `create_clip_from_segments`, which anchors the
+    bounds to subtitles (word-accurate, no manual timecodes). Use this one only
+    when the user explicitly gives you raw seconds. Creates a clip covering
+    [start, end] (seconds)."""
     if end <= start:
         raise RuntimeError("`end` doit être supérieur à `start`.")
     proj = _project(project_id)
@@ -321,7 +343,10 @@ def retime_clip_to_segments(project_id: str, clip_id: str, start_segment_id: str
 @mcp.tool()
 def update_clip(project_id: str, clip_id: str, name: str | None = None,
                 start: float | None = None, end: float | None = None) -> dict:
-    """Rename or re-time an existing clip."""
+    """Rename or re-time an existing clip. ⚠️ For RE-TIMING prefer
+    `retime_clip_to_segments` (subtitle-anchored, word-accurate); pass raw
+    start/end here only when the user explicitly gives you seconds. Renaming
+    (name only) is fine."""
     proj = _project(project_id)
     clips = proj.get("clips", [])
     hit = next((c for c in clips if c["id"] == clip_id), None)
@@ -351,7 +376,10 @@ def set_clips(project_id: str, clips: list[dict]) -> list[dict]:
     """Replace the ENTIRE clip list in one atomic write — the fast way to lay down
     (or re-plan) many clips at once. Each item is {name?, start, end, id?}; ids
     are generated when omitted, kept when given (so you can update in place).
-    Returns the saved clips."""
+    ⚠️ These are raw-time bounds: PREFER anchoring clips to subtitles — build the
+    start/end from segment boundaries (get_transcript / get_segment) or use
+    `create_clip_from_segments`. Pass raw seconds here only when the user
+    explicitly asks. Returns the saved clips."""
     out: list[dict] = []
     for c in clips:
         if c.get("end") is None or c.get("start") is None or c["end"] <= c["start"]:
@@ -434,6 +462,21 @@ def list_scenes(project_id: str) -> list[dict]:
 
 
 @mcp.tool()
+def rename_scene(project_id: str, scene_id: str, name: str) -> list[dict]:
+    """Rename a scene (camera angle / B-roll) to what it actually shows — e.g.
+    "Slides", "Présentateur", "Gros plan". scene_id from list_scenes. Returns the
+    updated scene list."""
+    proj = _project(project_id)
+    scenes = proj.get("scenes", [])
+    hit = next((s for s in scenes if s["id"] == scene_id), None)
+    if hit is None:
+        raise RuntimeError(f"Scène inconnue: {scene_id}")
+    hit["name"] = name
+    _patch(project_id, {"scenes": scenes})
+    return scenes
+
+
+@mcp.tool()
 def list_scene_changes(project_id: str, scene: str = "main", threshold: float = 0.4,
                        crop: str = "", start: float | None = None,
                        end: float | None = None) -> list[dict]:
@@ -459,12 +502,33 @@ def list_scene_cuts(project_id: str) -> list[dict]:
 
 @mcp.tool()
 def add_scene_cut(project_id: str, time: float, scene_id: str) -> dict:
-    """Switch to scene `scene_id` starting at `time` (seconds). Use a scene id from
-    list_scenes ("main" to return to the primary angle)."""
+    """⚠️ Raw-time API — PREFER `add_scene_cut_at_segment`, which anchors the cut
+    to a subtitle (no manual timecodes). Use this one only when the user
+    explicitly gives you a raw time. Switches to `scene_id` at `time` (seconds);
+    scene id from list_scenes ("main" to return to the primary angle)."""
     proj = _project(project_id)
     if not any(s["id"] == scene_id for s in proj.get("scenes", [])):
         raise RuntimeError(f"Scène inconnue: {scene_id}")
     cut = {"id": _uid("cut-"), "time": float(time), "scene_id": scene_id}
+    cuts = sorted(proj.get("scene_cuts", []) + [cut], key=lambda c: c["time"])
+    _patch(project_id, {"scene_cuts": cuts})
+    return cut
+
+
+@mcp.tool()
+def add_scene_cut_at_segment(project_id: str, segment_id: str, scene_id: str,
+                             at: str = "start") -> dict:
+    """Switch to scene `scene_id` anchored to a subtitle — the UI's per-line scene
+    switch, so you never look up a timecode. `at`="start" (default) cuts at the
+    segment's start; "end" cuts at its end (handy to switch back right after a
+    line finishes). scene_id from list_scenes ("main" = primary angle). Returns
+    the created cut."""
+    proj = _project(project_id)
+    if not any(s["id"] == scene_id for s in proj.get("scenes", [])):
+        raise RuntimeError(f"Scène inconnue: {scene_id}")
+    seg = _segment(project_id, segment_id)
+    t = float(seg["end"] if at == "end" else seg["start"])
+    cut = {"id": _uid("cut-"), "time": t, "scene_id": scene_id}
     cuts = sorted(proj.get("scene_cuts", []) + [cut], key=lambda c: c["time"])
     _patch(project_id, {"scene_cuts": cuts})
     return cut
@@ -480,17 +544,40 @@ def clear_scene_cuts(project_id: str) -> list[dict]:
 @mcp.tool()
 def set_scene_cuts(project_id: str, cuts: list[dict]) -> list[dict]:
     """Replace the ENTIRE scene-cut timeline in one atomic write — the fast way to
-    lay down a dynamic edit (many switches) at once, instead of clear + N adds.
-    Each item is {time, scene_id, id?}; scene_id must exist (use "main" for the
-    primary angle). Cuts are validated and returned sorted by time."""
+    lay down a whole dynamic edit at once, instead of clear + N adds. Each item
+    needs `scene_id` (must exist; "main" = primary angle) and a position.
+    PREFER anchoring each cut to a subtitle via `segment_id` (+ optional
+    `at`="start"|"end", default "start") — build the whole edit without looking up
+    a single timecode. ⚠️ A raw `time` is accepted too but is discouraged: use it
+    only when the user explicitly gives you seconds. Optional `id` to keep a cut's
+    id. Cuts are validated and returned sorted by time."""
     proj = _project(project_id)
     valid = {s["id"] for s in proj.get("scenes", [])}
+
+    seg_map: dict[str, dict] | None = None
+
+    def _seg_time(segment_id: str, at: str) -> float:
+        nonlocal seg_map
+        if seg_map is None:  # fetch the transcript once, only if a cut needs it
+            seg_map = {r["id"]: r for r in
+                       _call("GET", f"/api/projects/{project_id}/transcript").json()}
+        row = seg_map.get(segment_id)
+        if row is None:
+            raise RuntimeError(f"Segment inconnu: {segment_id}")
+        return float(row["end"] if at == "end" else row["start"])
+
     out: list[dict] = []
     for c in cuts:
         if c.get("scene_id") not in valid:
             raise RuntimeError(f"Scène inconnue: {c.get('scene_id')}")
+        if c.get("segment_id"):
+            t = _seg_time(c["segment_id"], c.get("at", "start"))
+        elif c.get("time") is not None:
+            t = float(c["time"])
+        else:
+            raise RuntimeError(f"Coupure sans `time` ni `segment_id`: {c}")
         out.append({"id": c.get("id") or _uid("cut-"),
-                    "time": float(c["time"]), "scene_id": c["scene_id"]})
+                    "time": t, "scene_id": c["scene_id"]})
     out.sort(key=lambda c: c["time"])
     _patch(project_id, {"scene_cuts": out})
     return out

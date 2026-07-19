@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { useModal } from "./Modal";
 import type { ContextPreset } from "../types";
 
 /** Context/prompt given to whisper for (re)transcription — steers the spelling of
@@ -13,13 +14,19 @@ export function ContextPanel({
   prompt: string;
   onChange: (value: string) => void;
 }) {
+  const modal = useModal();
   const [presets, setPresets] = useState<ContextPreset[]>([]);
   useEffect(() => {
     api.listContextPresets().then(setPresets).catch(() => {});
   }, []);
 
   async function saveCurrentAsPreset() {
-    const name = window.prompt("Nom du préréglage de contexte ?")?.trim();
+    const name = (
+      await modal.prompt({
+        title: "Enregistrer le préréglage",
+        placeholder: "Nom du préréglage de contexte",
+      })
+    )?.trim();
     if (!name) return;
     try {
       const preset = await api.saveContextPreset(name, prompt);

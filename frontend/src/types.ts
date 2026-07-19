@@ -129,6 +129,7 @@ export interface ProjectSummary {
   status: ProjectStatus;
   duration: number;
   created_at: string;
+  clip_count: number;
 }
 
 /** A saved caption-style preset (user-created, persisted on the backend). */

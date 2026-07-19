@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Home } from "./components/Home";
 import { ProcessingView } from "./components/ProcessingView";
 import { Editor } from "./components/Editor";
+import { ModalProvider } from "./components/Modal";
 import { api } from "./api";
 import type { Project, ProjectSummary } from "./types";
 
@@ -27,6 +28,7 @@ export function App() {
   }
 
   return (
+    <ModalProvider>
     <div className="app">
       <header className="topbar">
         <span className="logo">🎬 Éditeur — sous-titres locaux</span>
@@ -58,5 +60,6 @@ export function App() {
         />
       )}
     </div>
+    </ModalProvider>
   );
 }

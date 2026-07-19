@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { BUILTIN_PRESETS } from "../presets";
+import { useModal } from "./Modal";
 import type { Preset, Style } from "../types";
 
 // Bundled caption fonts (scripts/fetch-fonts.sh) + families already installed on
@@ -28,13 +29,16 @@ export function StylePanel({
   const set = <K extends keyof Style>(key: K, value: Style[K]) =>
     onChange({ [key]: value } as Partial<Style>);
 
+  const modal = useModal();
   const [presets, setPresets] = useState<Preset[]>([]);
   useEffect(() => {
     api.listPresets().then(setPresets).catch(() => {});
   }, []);
 
   async function saveCurrentAsPreset() {
-    const name = window.prompt("Nom du préréglage ?")?.trim();
+    const name = (
+      await modal.prompt({ title: "Enregistrer le préréglage", placeholder: "Nom du préréglage" })
+    )?.trim();
     if (!name) return;
     try {
       const preset = await api.savePreset(name, style);

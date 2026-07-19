@@ -15,6 +15,7 @@ import { ReframeBox } from "./ReframeBox";
 import { SceneStage } from "./SceneStage";
 import { ScenePanel } from "./ScenePanel";
 import { SceneSourceVideo } from "./SceneSourceVideo";
+import { useModal } from "./Modal";
 import { activeSceneId, cleanCuts, segCutTime, TRANSITION_DUR, TRANSITION_LEAD } from "../scenes";
 import { defaultFrameRect } from "../frame";
 import { formatTime } from "../time";
@@ -44,6 +45,7 @@ export function Editor({
   initial: Project;
   onReprocess: (id: string) => void;
 }) {
+  const modal = useModal();
   const [project, setProject] = useState<Project>(initial);
   const [style, setStyle] = useState<Style>(initial.style);
   const [overlays, setOverlays] = useState<Overlay[]>(initial.overlays);
@@ -513,14 +515,15 @@ export function Editor({
   // so we flush the current style/frame/overlays/clips first (they're preserved)
   // then hand back to the processing view until it's ready again.
   async function reprocess() {
-    if (
-      !window.confirm(
+    const ok = await modal.confirm({
+      title: "Recalculer la transcription",
+      message:
         "Recalculer la transcription ? Les sous-titres actuels (corrections et " +
-          "traductions comprises) seront remplacés. Le style, le cadrage, les " +
-          "clips et les incrustations sont conservés."
-      )
-    )
-      return;
+        "traductions comprises) seront remplacés. Le style, le cadrage, les " +
+        "clips et les incrustations sont conservés.",
+      confirmLabel: "Recalculer",
+    });
+    if (!ok) return;
     setReprocessing(true);
     try {
       await flush();
@@ -528,7 +531,7 @@ export function Editor({
       onReprocess(project.id);
     } catch {
       setReprocessing(false);
-      window.alert("Impossible de relancer la transcription.");
+      await modal.alert("Impossible de relancer la transcription.");
     }
   }
 

@@ -3,6 +3,7 @@ import { api } from "../api";
 import { formatTime } from "../time";
 import type { ProjectSummary } from "../types";
 import { Uploader } from "./Uploader";
+import { useModal } from "./Modal";
 
 const STATUS_LABEL: Record<ProjectSummary["status"], string> = {
   created: "En attente",
@@ -20,6 +21,7 @@ export function Home({
   onNew: (id: string) => void;
   onOpen: (summary: ProjectSummary) => void;
 }) {
+  const modal = useModal();
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
   const [renaming, setRenaming] = useState<ProjectSummary | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -59,20 +61,30 @@ export function Home({
   }
 
   async function remove(p: ProjectSummary) {
-    if (!window.confirm(`Supprimer le projet « ${p.name} » ? Cette action est définitive.`))
-      return;
+    const ok = await modal.confirm({
+      title: "Supprimer le projet",
+      message: `Supprimer le projet « ${p.name} » ? Cette action est définitive.`,
+      confirmLabel: "Supprimer",
+      danger: true,
+    });
+    if (!ok) return;
     await api.deleteProject(p.id).catch(() => {});
     refresh();
   }
 
   return (
     <div className="home">
+      <section className="home-new">
+        <h2>Nouveau projet</h2>
+        <Uploader onCreated={onNew} />
+      </section>
+
       <section className="home-projects">
         <h2>Mes projets</h2>
         {projects === null ? (
           <p className="muted">Chargement…</p>
         ) : projects.length === 0 ? (
-          <p className="muted">Aucun projet pour l’instant — importez une vidéo ci-dessous.</p>
+          <p className="muted">Aucun projet pour l’instant — importez une vidéo ci-dessus.</p>
         ) : (
           <ul className="project-grid">
             {projects.map((p) => (
@@ -88,6 +100,11 @@ export function Home({
                     {fmtDuration(p.duration) && (
                       <span className="project-dur">{fmtDuration(p.duration)}</span>
                     )}
+                    {p.clip_count > 0 && (
+                      <span className="project-clips">
+                        ✂️ {p.clip_count} clip{p.clip_count > 1 ? "s" : ""}
+                      </span>
+                    )}
                   </span>
                 </button>
                 <div className="project-actions">
@@ -102,11 +119,6 @@ export function Home({
             ))}
           </ul>
         )}
-      </section>
-
-      <section className="home-new">
-        <h2>Nouveau projet</h2>
-        <Uploader onCreated={onNew} />
       </section>
 
       {renaming && (
