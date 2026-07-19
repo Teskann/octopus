@@ -181,7 +181,17 @@ export function TranscriptPanel({
         (s) => s.text.toLowerCase().includes(q) || (s.translation || "").toLowerCase().includes(q)
       )
     : segments;
-  const activeId = segments.find((s) => t >= s.start && t < s.end)?.id ?? null;
+  // Active row: each segment owns the span from its OWN seek target (lead-in
+  // included, so it matches where a click lands) up to the NEXT segment's seek
+  // target. If we kept `t >= s.start` the lead-in could drop the playhead just
+  // below seg.start and light up the previous row — the boundary must move with
+  // the seek, exactly as the seek pulls the start back before the first word.
+  let activeId: string | null = null;
+  for (let i = 0; i < segments.length; i++) {
+    const lo = segmentSeekStart(segments[i]);
+    const hi = i + 1 < segments.length ? segmentSeekStart(segments[i + 1]) : segments[i].end;
+    if (t >= lo && t < hi) { activeId = segments[i].id; break; }
+  }
   const lastId = segments.length ? segments[segments.length - 1].id : null;
 
   // Auto-follow: keep the line at the playhead visible while playing (only when

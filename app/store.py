@@ -83,6 +83,38 @@ def normalize_frame(frame: dict | None) -> dict:
     return {**default_frame(), **(frame or {})}
 
 
+# Cuts closer than this collapse to a single switch (one word maps to one scene);
+# mirrors the frontend's `addSceneCut` tolerance.
+CUT_EPS = 0.05
+
+
+def normalize_scene_cuts(cuts: list[dict] | None) -> list[dict]:
+    """Enforce the two scene-cut invariants on every write, wherever it comes
+    from (editor PATCH or the MCP agent): at most one switch per timecode, and
+    never a switch to the scene already showing (a transition to itself). On a
+    timecode collision the later entry wins — matching the editor, where dropping
+    a new switch on a word replaces the one already there. Idempotent."""
+    valid = [c for c in (cuts or [])
+             if isinstance(c, dict) and "time" in c and "scene_id" in c]
+    ordered = sorted(valid, key=lambda c: float(c["time"]))
+    # collapse cuts sharing a timecode (within CUT_EPS) — keep the last one
+    deduped: list[dict] = []
+    for c in ordered:
+        if deduped and abs(float(c["time"]) - float(deduped[-1]["time"])) <= CUT_EPS:
+            deduped[-1] = c
+        else:
+            deduped.append(c)
+    # drop cuts that don't change the active scene (incl. a revert to itself)
+    out: list[dict] = []
+    active = "main"
+    for c in deduped:
+        if c["scene_id"] == active:
+            continue
+        out.append(c)
+        active = c["scene_id"]
+    return out
+
+
 def project_dir(project_id: str) -> Path:
     return config.PROJECTS_DIR / project_id
 
@@ -177,7 +209,7 @@ def get(project_id: str) -> dict | None:
         sc.setdefault("crop", {"x": 0.0, "y": 0.0, "w": 1.0, "h": 1.0})
         sc.setdefault("color", SCENE_COLORS[i % len(SCENE_COLORS)])
     project.setdefault("rev", 0)
-    project.setdefault("scene_cuts", [])
+    project["scene_cuts"] = normalize_scene_cuts(project.get("scene_cuts"))
     project.setdefault("whisper_prompt", "")
     project.setdefault("translations", {})
     project.setdefault("translate_status", "idle")
@@ -192,6 +224,8 @@ def update(project_id: str, patch: dict[str, Any]) -> dict | None:
     project = get(project_id)
     if project is None:
         return None
+    if "scene_cuts" in patch:
+        patch = {**patch, "scene_cuts": normalize_scene_cuts(patch["scene_cuts"])}
     project.update(patch)
     save(project)
     return project

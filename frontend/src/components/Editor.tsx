@@ -16,7 +16,7 @@ import { SceneStage } from "./SceneStage";
 import { ScenePanel } from "./ScenePanel";
 import { SceneSourceVideo } from "./SceneSourceVideo";
 import { useModal } from "./Modal";
-import { activeSceneId, cleanCuts, segCutTime, TRANSITION_DUR, TRANSITION_LEAD } from "../scenes";
+import { activeSceneId, cleanCuts, normalizeCuts, segCutTime, TRANSITION_DUR, TRANSITION_LEAD } from "../scenes";
 import { defaultFrameRect } from "../frame";
 import { formatTime } from "../time";
 import type { Clip, FitMode, Frame, Overlay, Project, Scene, SceneCut, Segment, Style } from "../types";
@@ -444,7 +444,11 @@ export function Editor({
     setTab("clips");
   }
 
-  function updateSceneCuts(next: SceneCut[]) {
+  function updateSceneCuts(raw: SceneCut[]) {
+    // Enforce the same invariants the backend does (one switch per timecode, no
+    // transition to the already-showing scene) so local state matches what's
+    // stored — otherwise the external-change poll would flag our own save.
+    const next = normalizeCuts(raw);
     setSceneCuts(next);
     lastEditRef.current = performance.now();
     window.clearTimeout(cutsTimer.current);

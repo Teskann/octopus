@@ -48,6 +48,35 @@ export function cleanCuts(cuts: SceneCut[]): SceneCut[] {
   return out;
 }
 
+/** Cuts closer than this collapse to a single switch (one word → one scene).
+ *  Mirrors the backend's `CUT_EPS` in `app/store.py`. */
+export const CUT_EPS = 0.05;
+
+/** Normalize a scene-cut timeline the same way the backend does on every write
+ *  (`app/store.py normalize_scene_cuts`): at most one switch per timecode (the
+ *  later one wins on a collision) and never a switch to the already-showing
+ *  scene. Apply before persisting so the editor's state matches what the server
+ *  stores (and what the MCP agent's writes are cleaned to). Idempotent. */
+export function normalizeCuts(cuts: SceneCut[]): SceneCut[] {
+  const ordered = [...cuts].sort((a, b) => a.time - b.time);
+  const deduped: SceneCut[] = [];
+  for (const c of ordered) {
+    if (deduped.length && Math.abs(c.time - deduped[deduped.length - 1].time) <= CUT_EPS) {
+      deduped[deduped.length - 1] = c; // later entry wins on a timecode collision
+    } else {
+      deduped.push(c);
+    }
+  }
+  let active = "main";
+  const out: SceneCut[] = [];
+  for (const c of deduped) {
+    if (c.scene_id === active) continue;
+    out.push(c);
+    active = c.scene_id;
+  }
+  return out;
+}
+
 /** Visible scene layers at time t (bottom → top). Normally one opaque layer;
  *  during a crossfade the outgoing scene sits under the incoming one, which
  *  fades + zooms in (matching the preview's `.scene-overlay` punch). */
