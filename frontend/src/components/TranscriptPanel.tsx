@@ -2,7 +2,7 @@ import { memo, useCallback, useEffect, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { api } from "../api";
 import { isWordActive } from "../captions";
-import { activeSceneId } from "../scenes";
+import { activeSceneId, segCutTime } from "../scenes";
 import { formatTime } from "../time";
 import type { Scene, SceneCut, Segment } from "../types";
 
@@ -98,7 +98,7 @@ const SegmentRow = memo(function SegmentRow({
       {!editing && scenes.length > 1 && (
         <div className="seg-scenes" title="Scène affichée à partir d'ici">
           {scenes.map((sc) => {
-            const on = activeSceneId(cuts, seg.start) === sc.id;
+            const on = activeSceneId(cuts, segCutTime(seg)) === sc.id;
             return (
               <button
                 key={sc.id}

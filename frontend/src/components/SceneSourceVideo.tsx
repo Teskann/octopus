@@ -7,11 +7,19 @@ import { api } from "../api";
 export function SceneSourceVideo({
   projectId,
   sceneId,
+  width,
+  height,
+  maxW,
+  maxH,
   t,
   playing,
 }: {
   projectId: string;
   sceneId: string;
+  width?: number;
+  height?: number;
+  maxW?: number;
+  maxH?: number;
   t: number;
   playing: boolean;
 }) {
@@ -46,6 +54,19 @@ export function SceneSourceVideo({
   }, []);
 
   return (
-    <video ref={ref} className="edit-video" src={api.sceneVideoUrl(projectId, sceneId)} muted playsInline preload="auto" />
+    // width/height reserve the scene's aspect BEFORE the video loads its metadata
+    // — without them a <video> reports 300×150 (2:1), so the in-flow .video-frame
+    // (and the ReframeBox drawn over it) would size wrong until load, then jump.
+    <video
+      ref={ref}
+      className="edit-video"
+      width={width || undefined}
+      height={height || undefined}
+      style={{ maxWidth: maxW || undefined, maxHeight: maxH || undefined }}
+      src={api.sceneVideoUrl(projectId, sceneId)}
+      muted
+      playsInline
+      preload="auto"
+    />
   );
 }

@@ -60,13 +60,17 @@ def get_project(project_id: str) -> dict:
 @mcp.tool()
 def get_transcript(project_id: str, q: str = "", start: float | None = None,
                    end: float | None = None, offset: int = 0,
-                   limit: int | None = None) -> list[dict]:
-    """Compact transcript: one row per segment {id, start, end, text, translation}.
-    Cheap to read; reason over this to pick the most impactful sequences. On long
-    talks, filter to keep it small: `q` = case-insensitive substring search over
-    text+translation; `start`/`end` = only segments overlapping that time window;
+                   limit: int | None = None, format: str = "rows"):
+    """Read the transcript. `format`:
+    - "rows" (default): one row per micro-segment {id, start, end, text,
+      translation} — precise, but big; use for exact clip boundaries.
+    - "paragraphs": segments merged into sentence-ish blocks {start, end, text}
+      (~10x smaller) — read the WHOLE talk in one call to spot the key moments,
+      then get exact times with search_transcript / get_segment.
+    - "text": flowing prose, no timecodes — smallest, pure comprehension.
+    Filters keep it small: `q` = substring search; `start`/`end` = time window;
     `offset`/`limit` = paginate."""
-    params: dict[str, Any] = {"q": q, "offset": offset}
+    params: dict[str, Any] = {"q": q, "offset": offset, "format": format}
     if start is not None:
         params["start"] = start
     if end is not None:
@@ -242,6 +246,21 @@ def list_clips(project_id: str) -> list[dict]:
 
 
 @mcp.tool()
+def get_clip_transcript(project_id: str, clip_id: str = "", format: str = "text"):
+    """Read what a clip actually says — "hear" the cut before exporting, and check
+    it doesn't start an explanation late or chop it off. Each result carries
+    `starts_midsentence` / `ends_midsentence` flags. Pass a `clip_id` for one
+    clip, or leave it empty to get ALL clips at once (great for a QA pass).
+    `format`: "text" (prose) or "rows" (adds the covered segment rows)."""
+    if clip_id:
+        return _call("GET", f"/api/projects/{project_id}/clips/{clip_id}/transcript",
+                     params={"format": format}).json()
+    clips = _project(project_id).get("clips", [])
+    return [_call("GET", f"/api/projects/{project_id}/clips/{c['id']}/transcript",
+                  params={"format": format}).json() for c in clips]
+
+
+@mcp.tool()
 def create_clip(project_id: str, start: float, end: float, name: str = "Clip") -> dict:
     """Create a clip covering [start, end] (seconds). For clean cuts, align start/
     end to word boundaries from get_project (segment.words[].start / .end)."""
@@ -251,6 +270,52 @@ def create_clip(project_id: str, start: float, end: float, name: str = "Clip") -
     clip = {"id": _uid("clip-"), "name": name, "start": float(start), "end": float(end)}
     _patch(project_id, {"clips": proj.get("clips", []) + [clip]})
     return clip
+
+
+def _segment(project_id: str, segment_id: str) -> dict:
+    return _call("GET", f"/api/projects/{project_id}/segments/{segment_id}").json()
+
+
+@mcp.tool()
+def create_clip_from_segments(project_id: str, start_segment_id: str,
+                              end_segment_id: str = "", name: str = "Clip") -> dict:
+    """Create a clip spanning whole subtitles — exactly the UI's right-click
+    "Démarrer un clip" / "Terminer". The clip runs from the START of
+    `start_segment_id` to the END of `end_segment_id` (omit it for a single-
+    subtitle clip). Bounds are word-accurate by construction, so you never look up
+    timecodes by hand — pick segment ids from get_transcript. Order-tolerant.
+    Returns the created clip {id, name, start, end}."""
+    a = _segment(project_id, start_segment_id)
+    b = _segment(project_id, end_segment_id) if end_segment_id else a
+    start = min(float(a["start"]), float(b["start"]))
+    end = max(float(a["end"]), float(b["end"]))
+    if end <= start:
+        raise RuntimeError("Bornes de segment invalides (durée nulle).")
+    proj = _project(project_id)
+    clip = {"id": _uid("clip-"), "name": name, "start": start, "end": end}
+    _patch(project_id, {"clips": proj.get("clips", []) + [clip]})
+    return clip
+
+
+@mcp.tool()
+def retime_clip_to_segments(project_id: str, clip_id: str, start_segment_id: str,
+                            end_segment_id: str = "") -> dict:
+    """Re-time an existing clip to whole-subtitle bounds (START of
+    `start_segment_id` → END of `end_segment_id`, omit for a single subtitle).
+    Handy to snap a clip whose bounds drifted (e.g. after a re-transcription)
+    back onto clean segment edges. Returns the updated clip."""
+    a = _segment(project_id, start_segment_id)
+    b = _segment(project_id, end_segment_id) if end_segment_id else a
+    start = min(float(a["start"]), float(b["start"]))
+    end = max(float(a["end"]), float(b["end"]))
+    proj = _project(project_id)
+    clips = proj.get("clips", [])
+    hit = next((c for c in clips if c["id"] == clip_id), None)
+    if hit is None:
+        raise RuntimeError(f"Clip inconnu: {clip_id}")
+    hit["start"], hit["end"] = start, end
+    _patch(project_id, {"clips": clips})
+    return hit
 
 
 @mcp.tool()

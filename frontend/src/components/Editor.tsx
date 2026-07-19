@@ -15,7 +15,7 @@ import { ReframeBox } from "./ReframeBox";
 import { SceneStage } from "./SceneStage";
 import { ScenePanel } from "./ScenePanel";
 import { SceneSourceVideo } from "./SceneSourceVideo";
-import { activeSceneId, cleanCuts, TRANSITION_DUR, TRANSITION_LEAD } from "../scenes";
+import { activeSceneId, cleanCuts, segCutTime, TRANSITION_DUR, TRANSITION_LEAD } from "../scenes";
 import { defaultFrameRect } from "../frame";
 import { formatTime } from "../time";
 import type { Clip, FitMode, Frame, Overlay, Project, Scene, SceneCut, Segment, Style } from "../types";
@@ -294,9 +294,11 @@ export function Editor({
   const cropped = !reframing;
 
   // What to composite over the base video: overlay scenes always; the main only
-  // in "fit" mode. Except while reframing a secondary scene, where we show its
-  // full source instead (so the crop rectangle works like the main's).
-  const stage = editingSecondaryCrop
+  // in "fit" mode. Except while reframing: show the source being reframed (the
+  // main's base video, or a secondary's full source) so nothing covers the crop
+  // rectangle — otherwise a B-roll active at the playhead would render on top of
+  // the reframe box (z-index:2) and hide it while you edit the MAIN crop.
+  const stage = reframing
     ? null
     : previewScene && !previewScene.is_main
       ? { scene: previewScene, mode: previewScene.mode, crop: effCrop(previewScene) }
@@ -438,7 +440,7 @@ export function Editor({
   }
 
   function addSceneCut(seg: Segment, sceneId: string) {
-    const time = seg.words.length ? seg.words[0].start : seg.start;
+    const time = segCutTime(seg);
     // replace any near-coincident cut so a word maps to one scene
     const kept = sceneCuts.filter((c) => Math.abs(c.time - time) > 0.05);
     const cut: SceneCut = { id: "cut" + Math.floor(performance.now() * 1000).toString(36), time, scene_id: sceneId };
@@ -562,7 +564,14 @@ export function Editor({
     ? { position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, pointerEvents: "none" }
     : cropped
       ? { ...cropMap(frame), objectFit: "fill", maxWidth: "none", maxHeight: "none", opacity: stage ? 0 : 1, pointerEvents: "none" }
-      : { opacity: stage ? 0 : 1, pointerEvents: stage ? "none" : "auto" };
+      : {
+          // Reframing the MAIN: cap to the MEASURED outer so a full-height crop's
+          // box fits without clipping, while inline-block .video-frame keeps aspect.
+          maxWidth: outer.w || undefined,
+          maxHeight: outer.h || undefined,
+          opacity: stage ? 0 : 1,
+          pointerEvents: stage ? "none" : "auto",
+        };
 
   // Poll for changes made outside this editor (the MCP agent writes via the same
   // API). We compare the server's content to our live edits; a difference that is
@@ -650,6 +659,10 @@ export function Editor({
                 key={selectedScene.id}
                 projectId={project.id}
                 sceneId={selectedScene.id}
+                width={selectedScene.width}
+                height={selectedScene.height}
+                maxW={outer.w}
+                maxH={outer.h}
                 t={t}
                 playing={playing}
               />

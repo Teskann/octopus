@@ -1,4 +1,12 @@
-import type { SceneCut } from "./types";
+import type { SceneCut, Segment } from "./types";
+
+/** The time a per-line scene switch is anchored to — the first word's start
+ *  (falling back to the segment start). MUST match what `addSceneCut` writes,
+ *  so the per-line scene dot lights up on the segment it belongs to (and not the
+ *  next one). */
+export function segCutTime(seg: Segment): number {
+  return seg.words.length ? seg.words[0].start : seg.start;
+}
 
 /** The scene showing at time t: the last cut at or before t, else the main. */
 export function activeSceneId(cuts: SceneCut[], t: number): string {

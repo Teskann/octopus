@@ -16,6 +16,34 @@ from . import (
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
+_SENT_END = ".?!…\"»)"
+
+
+def _transcript_rows(project: dict) -> list[dict]:
+    return [
+        {"id": s["id"], "start": s["start"], "end": s["end"],
+         "text": s["text"], "translation": s.get("translation", "")}
+        for s in project["segments"]
+    ]
+
+
+def _paragraphs(rows: list[dict], max_chars: int = 220) -> list[dict]:
+    """Merge micro-segments into sentence-ish paragraphs, keeping start/end. Cuts
+    the row count ~10x so the whole talk fits in context in one read, while still
+    carrying coarse timecodes to jump back to."""
+    paras: list[dict] = []
+    buf: list[dict] = []
+    for r in rows:
+        buf.append(r)
+        joined = " ".join(x["text"] for x in buf).strip()
+        if (joined[-1:] in _SENT_END and len(joined) >= 60) or len(joined) >= max_chars:
+            paras.append({"start": buf[0]["start"], "end": buf[-1]["end"], "text": joined})
+            buf = []
+    if buf:
+        joined = " ".join(x["text"] for x in buf).strip()
+        paras.append({"start": buf[0]["start"], "end": buf[-1]["end"], "text": joined})
+    return paras
+
 
 @router.post("")
 async def create_project(
@@ -79,22 +107,22 @@ def get_project(project_id: str) -> dict:
 @router.get("/{project_id}/transcript")
 def get_transcript(project_id: str, q: str = "", start: float | None = None,
                    end: float | None = None, offset: int = 0,
-                   limit: int | None = None) -> list[dict]:
-    """Compact, token-cheap view of the transcript: one row per segment with its
-    id, timecodes, text and translation (no per-word timings). An agent reasons
-    over this to pick clip boundaries; word-level timings stay in GET /{id}.
+                   limit: int | None = None, format: str = "rows"):
+    """Token-cheap view of the transcript. `format`:
+    - "rows" (default): one row per micro-segment {id, start, end, text,
+      translation} — use for exact clip boundaries.
+    - "paragraphs": micro-segments merged into sentence-ish blocks
+      {start, end, text} (~10x fewer rows) — read the whole talk in ONE call to
+      find the important moments, keeping coarse timecodes.
+    - "text": flowing prose, no timecodes — smallest, for pure comprehension.
 
-    Optional filters keep the payload small on long talks: `q` = case-insensitive
-    substring search over text+translation; `start`/`end` = keep segments
-    overlapping that time window; `offset`/`limit` = paginate."""
+    Filters (applied to segments first): `q` = case-insensitive substring search
+    over text+translation; `start`/`end` = segments overlapping that window;
+    `offset`/`limit` = paginate the resulting rows/paragraphs."""
     project = store.get(project_id)
     if project is None:
         raise HTTPException(404, "Unknown project")
-    rows = [
-        {"id": s["id"], "start": s["start"], "end": s["end"],
-         "text": s["text"], "translation": s.get("translation", "")}
-        for s in project["segments"]
-    ]
+    rows = _transcript_rows(project)
     if q:
         ql = q.lower()
         rows = [r for r in rows
@@ -103,11 +131,59 @@ def get_transcript(project_id: str, q: str = "", start: float | None = None,
         rows = [r for r in rows if r["end"] > start]
     if end is not None:
         rows = [r for r in rows if r["start"] < end]
+
+    if format in ("paragraphs", "text"):
+        items = _paragraphs(rows)
+        if offset:
+            items = items[max(offset, 0):]
+        if limit is not None:
+            items = items[:max(limit, 0)]
+        if format == "text":
+            return " ".join(p["text"] for p in items)
+        return items
+
     if offset:
         rows = rows[max(offset, 0):]
     if limit is not None:
         rows = rows[:max(limit, 0)]
     return rows
+
+
+@router.get("/{project_id}/clips/{clip_id}/transcript")
+def get_clip_transcript(project_id: str, clip_id: str, format: str = "text") -> dict:
+    """What a clip actually says — to "hear" the cut before exporting. Returns the
+    text covered by [clip.start, clip.end] plus `starts_midsentence` /
+    `ends_midsentence` flags (do the bounds fall inside a sentence?) — the direct
+    check for "don't start an explanation late / don't cut it off". `format`:
+    "text" (prose) or "rows" (adds the covered segment rows)."""
+    project = store.get(project_id)
+    if project is None:
+        raise HTTPException(404, "Unknown project")
+    clip = next((c for c in project.get("clips", []) if c["id"] == clip_id), None)
+    if clip is None:
+        raise HTTPException(404, "Unknown clip")
+    rows = _transcript_rows(project)
+    covered = [i for i, r in enumerate(rows)
+               if r["end"] > clip["start"] and r["start"] < clip["end"]]
+    seg_rows = [rows[i] for i in covered]
+    text = " ".join(r["text"] for r in seg_rows).strip()
+
+    starts_mid = False
+    if covered and covered[0] > 0:
+        prev = rows[covered[0] - 1]
+        starts_mid = (prev["text"][-1:] not in _SENT_END
+                      and rows[covered[0]]["start"] - prev["end"] < 0.8)
+    ends_mid = bool(seg_rows) and seg_rows[-1]["text"][-1:] not in _SENT_END
+
+    out = {
+        "id": clip["id"], "name": clip.get("name", ""),
+        "start": clip["start"], "end": clip["end"],
+        "duration": round(clip["end"] - clip["start"], 2),
+        "text": text, "starts_midsentence": starts_mid, "ends_midsentence": ends_mid,
+    }
+    if format == "rows":
+        out["segments"] = seg_rows
+    return out
 
 
 @router.delete("/{project_id}")
