@@ -105,6 +105,12 @@ export const api = {
     );
   },
 
+  async splitSentences(id: string): Promise<unknown> {
+    return json(
+      await fetch(`/api/projects/${id}/segments/split-sentences`, { method: "POST" })
+    );
+  },
+
   async deleteSegment(id: string, segmentId: string): Promise<unknown> {
     return json(
       await fetch(`/api/projects/${id}/segments/${segmentId}`, { method: "DELETE" })

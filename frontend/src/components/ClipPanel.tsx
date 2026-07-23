@@ -4,8 +4,6 @@ import { formatTime as fmt } from "../time";
 import { useModal } from "./Modal";
 import type { Clip, RenderJob } from "../types";
 
-const round = (v: number) => Math.round(v * 10) / 10;
-
 export function ClipPanel({
   projectId,
   clips,
@@ -109,16 +107,6 @@ export function ClipPanel({
       {clip && (
         <div className="clip-edit">
           <input value={clip.name} onChange={(e) => update(clip.id, { name: e.target.value })} />
-          <div className="ov-row times">
-            <label>Début
-              <input type="number" step={0.1} value={round(clip.start)}
-                onChange={(e) => update(clip.id, { start: Number(e.target.value) })} />
-            </label>
-            <label>Fin
-              <input type="number" step={0.1} value={round(clip.end)}
-                onChange={(e) => update(clip.id, { end: Number(e.target.value) })} />
-            </label>
-          </div>
           <div className="clip-actions">
             <button className="btn sm" onClick={() => onPreview(clip)}>▶ Aperçu</button>
             <button className="btn sm" disabled={busy} onClick={() => exportClips([clip.id])}>⬇ Exporter</button>

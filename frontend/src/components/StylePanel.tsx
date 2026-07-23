@@ -22,9 +22,11 @@ const SYSTEM_FONTS = [
 export function StylePanel({
   style,
   onChange,
+  maxMarginV = 700,
 }: {
   style: Style;
   onChange: (patch: Partial<Style>) => void;
+  maxMarginV?: number;
 }) {
   const set = <K extends keyof Style>(key: K, value: Style[K]) =>
     onChange({ [key]: value } as Partial<Style>);
@@ -159,7 +161,7 @@ export function StylePanel({
       <label className="row">
         Marge : {style.margin_v}px
         <input
-          type="range" min={0} max={700} value={style.margin_v}
+          type="range" min={0} max={maxMarginV} value={style.margin_v}
           onChange={(e) => set("margin_v", Number(e.target.value))}
         />
       </label>

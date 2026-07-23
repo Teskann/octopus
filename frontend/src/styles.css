@@ -18,6 +18,24 @@
 
 * { box-sizing: border-box; }
 
+/* Slim, theme-matched scrollbars (Chromium's default light chrome looked out of
+   place on the near-black UI). Firefox uses the standard properties; the
+   thumb only shows a fill on hover so it stays discreet at rest. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-2) transparent;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-2);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--muted); background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
 body {
   margin: 0;
   background: var(--bg);
@@ -264,6 +282,26 @@ input[type="checkbox"]:checked::after {
 }
 .seg:hover { background: var(--hover); }
 .seg.active { background: var(--active); }
+.seg.selected { background: color-mix(in srgb, var(--accent-2) 22%, transparent); }
+.segments.selecting { user-select: none; }
+
+/* Clip-boundary controls (Clips-tab transcript only). */
+.clip-extend {
+  display: block; width: 100%;
+  margin: 0.3rem 0; padding: 0.4rem;
+  border: 1px dashed var(--border-2); border-radius: 8px;
+  background: transparent; color: var(--muted);
+  cursor: pointer; font-size: 0.9rem;
+}
+.clip-extend:hover { background: var(--hover); color: var(--text); border-color: var(--muted); }
+.seg-trim {
+  margin-left: auto; flex: 0 0 auto;
+  border: none; background: transparent; color: var(--muted);
+  cursor: pointer; font-size: 1.2rem; line-height: 1; padding: 0 0.3rem;
+  opacity: 0; transition: opacity 0.1s;
+}
+.seg:hover .seg-trim { opacity: 1; }
+.seg-trim:hover { color: var(--err); }
 .ts { color: var(--muted); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
 .seg-text .word.on { color: var(--accent-2); font-weight: 700; }
 .seg-trans { color: var(--muted); font-style: italic; }

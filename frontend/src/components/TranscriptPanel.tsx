@@ -17,6 +17,7 @@ type RowProps = {
   active: boolean;
   editing: boolean;
   isStart: boolean;
+  selected: boolean;
   t: number; // live only for the active line, else 0 (so inactive props stay stable)
   draftText: string; // live only for the editing line, else ""
   draftTrans: string;
@@ -34,12 +35,22 @@ type RowProps = {
   onMerge: (seg: Segment) => void;
   onDelete: (seg: Segment) => void;
   onSceneCut: (seg: Segment, sceneId: string) => void;
+  onTrimClip?: () => void; // clip view only: shrink the clip past this (first/last) line
+};
+
+// Clip-boundary controls, present only in the Clips-tab transcript view. Each
+// handler is undefined when it can't apply (no neighbouring segment / single line).
+export type ClipEdit = {
+  onExtendBefore?: () => void;
+  onExtendAfter?: () => void;
+  onTrimFirst?: () => void;
+  onTrimLast?: () => void;
 };
 
 const SegmentRow = memo(function SegmentRow({
-  seg, isLast, active, editing, isStart, t, draftText, draftTrans, busy, scenes, cuts,
+  seg, isLast, active, editing, isStart, selected, t, draftText, draftTrans, busy, scenes, cuts,
   onSeek, onOpenMenu, onStartEdit, onCancelEdit, onDraftText, onDraftTrans,
-  onSave, onSplit, onMerge, onDelete, onSceneCut,
+  onSave, onSplit, onMerge, onDelete, onSceneCut, onTrimClip,
 }: RowProps) {
   // Seek to (just before) the first word, not seg.start: whisper's segment offset
   // can sit up to ~1s before the first word, and the previous caption is "glued" on
@@ -50,7 +61,7 @@ const SegmentRow = memo(function SegmentRow({
   return (
     <div
       data-seg-id={seg.id}
-      className={`seg ${active ? "active" : ""} ${editing ? "editing" : ""} ${isStart ? "clip-start" : ""}`}
+      className={`seg ${active ? "active" : ""} ${editing ? "editing" : ""} ${isStart ? "clip-start" : ""} ${selected ? "selected" : ""}`}
       onContextMenu={(e) => onOpenMenu(e, seg)}
     >
       <span className="ts" onClick={() => onSeek(seekTarget)}>
@@ -117,6 +128,15 @@ const SegmentRow = memo(function SegmentRow({
           })}
         </div>
       )}
+      {!editing && onTrimClip && (
+        <button
+          className="seg-trim"
+          title="Retirer ce segment du clip"
+          onClick={(e) => { e.stopPropagation(); onTrimClip(); }}
+        >
+          ×
+        </button>
+      )}
     </div>
   );
 });
@@ -135,6 +155,7 @@ export function TranscriptPanel({
   onSceneCut,
   withSearch = false,
   follow = false,
+  clipEdit,
 }: {
   projectId: string;
   segments: Segment[];
@@ -149,6 +170,7 @@ export function TranscriptPanel({
   onSceneCut: (seg: Segment, sceneId: string) => void;
   withSearch?: boolean;
   follow?: boolean;
+  clipEdit?: ClipEdit;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftText, setDraftText] = useState("");
@@ -156,6 +178,11 @@ export function TranscriptPanel({
   const [busy, setBusy] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number; seg: Segment } | null>(null);
   const [query, setQuery] = useState("");
+  // Range selection for merging: drag (mouse down + move) across consecutive
+  // lines to select them, then right-click → Fusionner.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selecting, setSelecting] = useState(false);
+  const dragRef = useRef<{ anchor: number; dragging: boolean; moved: boolean } | null>(null);
   const segsRef = useRef<HTMLDivElement>(null);
 
   // Refs holding the latest live values, so the row-facing callbacks below stay
@@ -174,6 +201,17 @@ export function TranscriptPanel({
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
   }, [menu]);
+
+  // End a range-drag on mouse release anywhere; the selection itself persists
+  // until the next click/merge so the context menu can act on it.
+  useEffect(() => {
+    const up = () => {
+      if (dragRef.current) dragRef.current.dragging = false;
+      setSelecting(false);
+    };
+    window.addEventListener("mouseup", up);
+    return () => window.removeEventListener("mouseup", up);
+  }, []);
 
   const q = query.trim().toLowerCase();
   const shown = q
@@ -251,6 +289,56 @@ export function TranscriptPanel({
   const onMerge = useCallback((seg: Segment) => run(() => api.mergeSegment(projectId, seg.id)), [run, projectId]);
   const onDelete = useCallback((seg: Segment) => run(() => api.deleteSegment(projectId, seg.id)), [run, projectId]);
 
+  // Fusion of the selected consecutive lines: `merge_with_next` absorbs the line
+  // after `first`, so calling it (n-1) times on the first id collapses the range.
+  const mergeSelected = useCallback(() => {
+    const ids = shown.filter((s) => selected.has(s.id)).map((s) => s.id);
+    if (ids.length < 2) return;
+    setMenu(null);
+    run(async () => {
+      for (let k = 0; k < ids.length - 1; k++) await api.mergeSegment(projectId, ids[0]);
+    }).then(() => setSelected(new Set()));
+  }, [shown, selected, run, projectId]);
+
+  // Cut every multi-sentence line at its sentence ends (.?!…), project-wide.
+  const splitAllSentences = useCallback(() => {
+    setMenu(null);
+    run(() => api.splitSentences(projectId));
+  }, [run, projectId]);
+
+  const segIndexAt = (target: EventTarget | null): number => {
+    const el = (target as HTMLElement)?.closest?.("[data-seg-id]");
+    const id = el?.getAttribute("data-seg-id");
+    return id ? shown.findIndex((s) => s.id === id) : -1;
+  };
+
+  // Drag = range-select. Left button on a line's text starts a fresh selection;
+  // moving over other lines extends it. Disabled while searching, since `shown`
+  // is then a non-contiguous subset and "consecutive" wouldn't match the store.
+  const onSegMouseDown = (e: ReactMouseEvent) => {
+    if (e.button !== 0 || q) return;
+    if (!(e.target as HTMLElement).closest?.(".seg-text")) return;
+    const idx = segIndexAt(e.target);
+    if (idx < 0) return;
+    e.preventDefault(); // no native text selection while range-selecting
+    dragRef.current = { anchor: idx, dragging: true, moved: false };
+    setSelected(new Set());
+  };
+  const onSegMouseMove = (e: ReactMouseEvent) => {
+    const d = dragRef.current;
+    if (!d || !d.dragging) return;
+    if (!(e.buttons & 1)) { d.dragging = false; return; }
+    const idx = segIndexAt(e.target);
+    if (idx < 0) return;
+    if (idx !== d.anchor) d.moved = true;
+    if (!d.moved) return;
+    const lo = Math.min(d.anchor, idx), hi = Math.max(d.anchor, idx);
+    const range = new Set<string>();
+    for (let i = lo; i <= hi; i++) range.add(shown[i].id);
+    setSelected(range);
+    setSelecting(true);
+  };
+
   return (
     <div className="transcript">
       <div className="transcript-head">
@@ -264,15 +352,34 @@ export function TranscriptPanel({
             onChange={(e) => setQuery(e.target.value)}
           />
         )}
-        <p className="muted small" title="Clic : aller · Double-clic : corriger · Clic droit : clip / scène">
-          Clic : aller · double-clic : corriger
-          {q ? ` · ${shown.length} résultat${shown.length > 1 ? "s" : ""}` : ""}
-        </p>
+        {q && (
+          <p className="muted small">
+            {shown.length} résultat{shown.length > 1 ? "s" : ""}
+          </p>
+        )}
       </div>
-      <div className="segments" ref={segsRef}>
+      <div
+        className={`segments ${selecting ? "selecting" : ""}`}
+        ref={segsRef}
+        onMouseDown={onSegMouseDown}
+        onMouseMove={onSegMouseMove}
+      >
+        {clipEdit?.onExtendBefore && (
+          <button className="clip-extend" onClick={clipEdit.onExtendBefore}>
+            ＋ Étendre avant (segment précédent)
+          </button>
+        )}
         {shown.map((s) => {
           const active = s.id === activeId;
           const editing = editingId === s.id;
+          const trimClip =
+            clipEdit && shown.length > 1
+              ? s.id === shown[0].id
+                ? clipEdit.onTrimFirst
+                : s.id === shown[shown.length - 1].id
+                  ? clipEdit.onTrimLast
+                  : undefined
+              : undefined;
           return (
             <SegmentRow
               key={s.id}
@@ -281,6 +388,7 @@ export function TranscriptPanel({
               active={active}
               editing={editing}
               isStart={s.id === pendingClipStartId}
+              selected={selected.has(s.id)}
               t={active ? t : 0}
               draftText={editing ? draftText : ""}
               draftTrans={editing ? draftTrans : ""}
@@ -298,13 +406,31 @@ export function TranscriptPanel({
               onMerge={onMerge}
               onDelete={onDelete}
               onSceneCut={sceneCutStable}
+              onTrimClip={trimClip}
             />
           );
         })}
+        {clipEdit?.onExtendAfter && (
+          <button className="clip-extend" onClick={clipEdit.onExtendAfter}>
+            ＋ Étendre après (segment suivant)
+          </button>
+        )}
       </div>
 
       {menu && (
         <div className="tl-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
+          {selected.has(menu.seg.id) && selected.size >= 2 && (
+            <>
+              <button disabled={busy} onClick={mergeSelected}>
+                ⤵ Fusionner {selected.size} sous-titres
+              </button>
+              <div className="menu-sep" />
+            </>
+          )}
+          <button disabled={busy} onClick={splitAllSentences}>
+            ✂ Découper à la fin des phrases
+          </button>
+          <div className="menu-sep" />
           <button onClick={() => { onStartClip(menu.seg); setMenu(null); }}>
             ▶ Démarrer un clip ici
           </button>

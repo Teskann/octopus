@@ -6,7 +6,7 @@ import { CaptionBlock } from "./CaptionBlock";
 import { ContextPanel } from "./ContextPanel";
 import { StylePanel } from "./StylePanel";
 import { TranslateBar } from "./TranslateBar";
-import { TranscriptPanel } from "./TranscriptPanel";
+import { TranscriptPanel, type ClipEdit } from "./TranscriptPanel";
 import { OverlayPanel } from "./OverlayPanel";
 import { OverlayLayer } from "./OverlayLayer";
 import { Timeline } from "./Timeline";
@@ -16,7 +16,7 @@ import { SceneStage } from "./SceneStage";
 import { ScenePanel } from "./ScenePanel";
 import { SceneSourceVideo } from "./SceneSourceVideo";
 import { useModal } from "./Modal";
-import { activeSceneId, cleanCuts, normalizeCuts, segCutTime, TRANSITION_DUR, TRANSITION_LEAD } from "../scenes";
+import { activeSceneId, cleanCuts, CUT_EPS, normalizeCuts, segCutTime, TRANSITION_DUR, TRANSITION_LEAD } from "../scenes";
 import { defaultFrameRect } from "../frame";
 import { formatTime } from "../time";
 import type { Clip, FitMode, Frame, Overlay, Project, Scene, SceneCut, Segment, Style } from "../types";
@@ -94,6 +94,11 @@ export function Editor({
   // not mistaken for — and clobbered by — an external change).
   const revRef = useRef<number>(initial.rev ?? 0);
   const lastEditRef = useRef<number>(0);
+  // How many of our OWN debounced saves are currently in flight. While any is,
+  // the rev the server reports is ours — the external-change poll must not treat
+  // it as someone else's edit (that was the source of spurious "modified by the
+  // agent" banners during normal editing).
+  const savesInFlightRef = useRef(0);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -336,6 +341,9 @@ export function Editor({
     return { width: `${Math.round(w)}px`, height: `${Math.round(h)}px` };
   })();
   const captionScale = regionWidth ? regionWidth / REFERENCE_WIDTH : 0.4;
+  // Caption margin is in the 1080-referenced output frame, so a full-height
+  // margin equals the output height mapped into that reference (width = 1080).
+  const maxMarginV = Math.round(REFERENCE_WIDTH * (outH / outW || 16 / 9));
   // Overlays are positioned in SOURCE coordinates (like the export), so in the
   // cropped view they live in a crop-mapped layer sized to the whole source.
   const overlaySourceWidth = cropped
@@ -372,13 +380,24 @@ export function Editor({
         pointerEvents: "none",
       };
 
+  // Persist a slice and keep the reconciled revision in step with our own writes,
+  // so the poll below never mistakes them for an external edit. Monotonic: a late
+  // response can't drag revRef backwards past a newer save.
+  function saveProject(patch: Partial<Project>) {
+    savesInFlightRef.current++;
+    api.patchProject(project.id, patch)
+      .then((p) => { if (p.rev > revRef.current) revRef.current = p.rev; })
+      .catch(() => {})
+      .finally(() => { savesInFlightRef.current--; });
+  }
+
   function updateStyle(patch: Partial<Style>) {
     const next = { ...style, ...patch };
     setStyle(next);
     lastEditRef.current = performance.now();
     window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
-      api.patchProject(project.id, { style: next }).catch(() => {});
+      saveProject({ style: next });
     }, 400);
   }
 
@@ -387,7 +406,7 @@ export function Editor({
     lastEditRef.current = performance.now();
     window.clearTimeout(overlayTimer.current);
     overlayTimer.current = window.setTimeout(() => {
-      api.patchProject(project.id, { overlays: next }).catch(() => {});
+      saveProject({ overlays: next });
     }, 400);
   }
 
@@ -400,9 +419,33 @@ export function Editor({
     lastEditRef.current = performance.now();
     window.clearTimeout(clipTimer.current);
     clipTimer.current = window.setTimeout(() => {
-      api.patchProject(project.id, { clips: next }).catch(() => {});
+      saveProject({ clips: next });
     }, 400);
   }
+  const updateClipsRef = useRef(updateClips);
+  updateClipsRef.current = updateClips;
+
+  // Clip-boundary controls for the Clips-tab transcript: snap the selected clip's
+  // start/end onto the neighbouring transcript segments. Ref-called so the memo
+  // stays stable across playhead frames (it must not depend on updateClips).
+  const clipEdit = useMemo<ClipEdit | undefined>(() => {
+    if (!selectedClip) return undefined;
+    const segs = project.segments;
+    const inClip = segs.filter((s) => s.end > selectedClip.start && s.start < selectedClip.end);
+    if (inClip.length === 0) return undefined;
+    const firstIdx = segs.findIndex((s) => s.id === inClip[0].id);
+    const lastIdx = segs.findIndex((s) => s.id === inClip[inClip.length - 1].id);
+    const prev = firstIdx > 0 ? segs[firstIdx - 1] : null;
+    const next = lastIdx >= 0 && lastIdx < segs.length - 1 ? segs[lastIdx + 1] : null;
+    const setClip = (patch: Partial<Clip>) =>
+      updateClipsRef.current(clips.map((c) => (c.id === selectedClip.id ? { ...c, ...patch } : c)));
+    return {
+      onExtendBefore: prev ? () => setClip({ start: prev.start }) : undefined,
+      onExtendAfter: next ? () => setClip({ end: next.end }) : undefined,
+      onTrimFirst: inClip.length > 1 ? () => setClip({ start: inClip[1].start }) : undefined,
+      onTrimLast: inClip.length > 1 ? () => setClip({ end: inClip[inClip.length - 2].end }) : undefined,
+    };
+  }, [selectedClip, project.segments, clips]);
 
   function updateFrame(patch: Partial<Frame>) {
     const next = { ...frame, ...patch };
@@ -410,7 +453,7 @@ export function Editor({
     lastEditRef.current = performance.now();
     window.clearTimeout(frameTimer.current);
     frameTimer.current = window.setTimeout(() => {
-      api.patchProject(project.id, { frame: next }).catch(() => {});
+      saveProject({ frame: next });
     }, 400);
   }
 
@@ -419,7 +462,7 @@ export function Editor({
     lastEditRef.current = performance.now();
     window.clearTimeout(promptTimer.current);
     promptTimer.current = window.setTimeout(() => {
-      api.patchProject(project.id, { whisper_prompt: next }).catch(() => {});
+      saveProject({ whisper_prompt: next });
     }, 400);
   }
 
@@ -428,7 +471,7 @@ export function Editor({
     lastEditRef.current = performance.now();
     window.clearTimeout(sceneTimer.current);
     sceneTimer.current = window.setTimeout(() => {
-      api.patchProject(project.id, { scenes: next }).catch(() => {});
+      saveProject({ scenes: next });
     }, 400);
   }
 
@@ -453,16 +496,41 @@ export function Editor({
     lastEditRef.current = performance.now();
     window.clearTimeout(cutsTimer.current);
     cutsTimer.current = window.setTimeout(() => {
-      api.patchProject(project.id, { scene_cuts: next }).catch(() => {});
+      saveProject({ scene_cuts: next });
     }, 400);
   }
 
   function addSceneCut(seg: Segment, sceneId: string) {
     const time = segCutTime(seg);
-    // replace any near-coincident cut so a word maps to one scene
-    const kept = sceneCuts.filter((c) => Math.abs(c.time - time) > 0.05);
-    const cut: SceneCut = { id: "cut" + Math.floor(performance.now() * 1000).toString(36), time, scene_id: sceneId };
-    updateSceneCuts([...kept, cut]);
+    const mkCut = (t: number, id: string, tag: string): SceneCut => ({
+      id: "cut" + Math.floor(performance.now() * 1000).toString(36) + tag,
+      time: t,
+      scene_id: id,
+    });
+    // Replace any near-coincident cut so a word maps to one scene.
+    const kept = sceneCuts.filter((c) => Math.abs(c.time - time) > CUT_EPS);
+    // The switch repaints only from here up to the nearest boundary AFTER it: the
+    // next existing scene cut, or the start of the next clip — whichever comes
+    // first (else the end). Bounding it this way stops a switch from bleeding
+    // across later cuts and silently swallowing them (which, when alternating a
+    // scene on one line, made the selection creep further with every click).
+    const nextCutTime = kept
+      .map((c) => c.time)
+      .filter((ct) => ct > time + CUT_EPS)
+      .reduce((m, ct) => Math.min(m, ct), Infinity);
+    const nextClipStart = clips
+      .map((c) => c.start)
+      .filter((s) => s > time + CUT_EPS)
+      .reduce((m, s) => Math.min(m, s), Infinity);
+    const next = [...kept, mkCut(time, sceneId, "a")];
+    // If the boundary is a clip start reached before any existing cut, pin the
+    // scene that was showing there so the switch can't overwrite the next clip.
+    // (A no-op when it would just repeat that scene — no self-transition.)
+    if (nextClipStart < nextCutTime && nextClipStart < Infinity) {
+      const after = activeSceneId(sceneCuts, nextClipStart);
+      if (after !== sceneId) next.push(mkCut(nextClipStart, after, "b"));
+    }
+    updateSceneCuts(next);
   }
 
   function startClip(seg: Segment) {
@@ -532,7 +600,13 @@ export function Editor({
     window.clearTimeout(cutsTimer.current);
     window.clearTimeout(sceneTimer.current);
     window.clearTimeout(promptTimer.current);
-    await api.patchProject(project.id, savedRef.current);
+    savesInFlightRef.current++;
+    try {
+      const p = await api.patchProject(project.id, savedRef.current);
+      if (p.rev > revRef.current) revRef.current = p.rev;
+    } finally {
+      savesInFlightRef.current--;
+    }
   }
 
   const [reprocessing, setReprocessing] = useState(false);
@@ -623,6 +697,10 @@ export function Editor({
         return;
       }
       if (rev === revRef.current) return; // nothing changed since we last synced
+      // A rev bump while our own save is still in flight is ours, not an external
+      // edit — its response will advance revRef. Skip until our writes settle, so
+      // we never fetch-and-compare our own half-landed state (spurious banner).
+      if (savesInFlightRef.current > 0) return;
       let fresh: Project;
       try {
         fresh = await api.getProject(pid);
@@ -857,7 +935,7 @@ export function Editor({
             </div>
             <ContextPanel prompt={whisperPrompt} onChange={updateContext} />
             <TranslateBar project={project} onUpdate={setProject} />
-            <StylePanel style={style} onChange={updateStyle} />
+            <StylePanel style={style} onChange={updateStyle} maxMarginV={maxMarginV} />
           </>
         )}
         {tab === "overlays" && (
@@ -896,6 +974,7 @@ export function Editor({
                 scenes={project.scenes}
                 cuts={sceneCuts}
                 onSceneCut={addSceneCut}
+                clipEdit={clipEdit}
               />
             )}
           </>

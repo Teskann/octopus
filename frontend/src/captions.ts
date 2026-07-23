@@ -145,15 +145,27 @@ export function buildCues(segments: Segment[], style: Style): Cue[] {
       cues[i].end = Math.min(next.start, cues[i].end + READ_TAIL);
     }
   }
-  // Keep each cue's LAST word highlighted until the caption itself disappears
-  // (cue.end, glue included) instead of dropping the highlight at the word's own
-  // end and leaving the block lit-nowhere while it lingers on screen. We swap in
-  // a cloned Word so the shared segment data is left untouched.
+  // Karaoke highlight must never go dark mid-caption: hold each word lit until the
+  // NEXT word lights up — bridging whisper's inter-word silences, most visible at
+  // an old segment boundary a merge swallowed (a long pause between what were two
+  // segments' words). The cue's last word is held until the caption itself
+  // disappears (cue.end, glue included). We swap in cloned Words so the shared
+  // segment data is left untouched. Half-open [start, boundary) intervals stay
+  // disjoint, so exactly one word is ever lit — no gap, no double-highlight.
   for (const cue of cues) {
     if (cue.lines.length === 0) continue;
-    const line = cue.lines[cue.lines.length - 1];
-    const wi = line.length - 1;
-    if (wi >= 0 && cue.end > line[wi].end) line[wi] = { ...line[wi], end: cue.end };
+    // Positions in reading order so we can look ahead to the next word (possibly
+    // on the following line) and write the clone back into the right line.
+    const pos: [number, number][] = [];
+    for (let li = 0; li < cue.lines.length; li++)
+      for (let wi = 0; wi < cue.lines[li].length; wi++) pos.push([li, wi]);
+    for (let k = 0; k < pos.length; k++) {
+      const [li, wi] = pos[k];
+      const w = cue.lines[li][wi];
+      const nextPos = pos[k + 1];
+      const boundary = nextPos ? cue.lines[nextPos[0]][nextPos[1]].start : cue.end;
+      if (boundary > w.end) cue.lines[li][wi] = { ...w, end: boundary };
+    }
   }
   return cues;
 }
