@@ -83,6 +83,14 @@ RENDER_JPEG_QUALITY = int(os.getenv("RENDER_JPEG_QUALITY", "95"))
 # Per-action timeout (ms) and how long to wait for the page to become ready.
 RENDER_PAGE_TIMEOUT_MS = int(os.getenv("RENDER_PAGE_TIMEOUT_MS", "60000"))
 RENDER_READY_TIMEOUT_MS = int(os.getenv("RENDER_READY_TIMEOUT_MS", "60000"))
+# Tail (seconds) added to a clip's end when exporting. whisper collapses the
+# final word's `.end` onto its segment boundary, so a clip cut at the last
+# word's `.end` chops that word's audio tail (the preview only *looks* complete
+# because it freezes on the last frame). This gives the last word room to
+# finish — clamped so it never runs into the next spoken word or past the
+# source. Matches captions.ts READ_TAIL so the caption/karaoke stay on screen
+# through the tail.
+EXPORT_END_PAD = float(os.getenv("EXPORT_END_PAD", "0.5"))
 
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

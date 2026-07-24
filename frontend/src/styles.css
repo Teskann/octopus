@@ -398,6 +398,11 @@ input[type="checkbox"]:checked::after {
   overflow-wrap: break-word;
   text-shadow: 0 2px 6px rgba(0, 0, 0, 0.55);
 }
+/* Pre-wrapped caption lines (blocksFor already split them by measured width):
+   the browser must honor that split exactly, never re-wrap a line into two —
+   otherwise a marginal canvas↔DOM width difference (Chrome > Firefox, and the
+   headless-Chrome export) turns a 2-line block into 3 rendered lines. */
+.cap-line { white-space: nowrap; }
 
 .style-panel .two { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; }
 .style-panel input:disabled { opacity: 0.4; }

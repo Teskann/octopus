@@ -73,7 +73,7 @@ export function CaptionBlock({
           cue.lines.map((line, li) => (
             <div className="cap-row" key={li}>
               <span
-                className="cap-box"
+                className="cap-box cap-line"
                 style={textStyle(style.font_size * scale, style.primary_color, style.outline_width * scale)}
               >
                 {line.map((w, wi) => {

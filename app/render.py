@@ -27,6 +27,28 @@ from typing import Callable
 from . import config, store
 
 
+def _export_end(project: dict, raw_end: float) -> float:
+    """Where to actually end the exported clip. whisper collapses the last
+    word(s) of a segment onto its boundary (near-zero duration), so a clip's
+    ``end`` often lands *on* the start of its final word/caption block — cutting
+    there drops that word from both audio and captions. Extend by
+    ``EXPORT_END_PAD`` to let the sentence finish, clamped so it never runs past
+    the source nor into the NEXT segment's speech.
+
+    We clamp to the next segment's first *word* (not its nominal start): there is
+    normally a silent gap at a segment boundary, and that gap is exactly the room
+    the collapsed tail word needs. Words of the CURRENT segment that start at
+    ``raw_end`` are the tail we want to keep, so only *later* segments count."""
+    duration = float(project.get("duration") or raw_end)
+    next_start = min(
+        (s["words"][0]["start"]
+         for s in project.get("segments", [])
+         if s.get("words") and s["start"] > raw_end + 1e-3),
+        default=duration,
+    )
+    return min(raw_end + config.EXPORT_END_PAD, next_start, duration)
+
+
 def _render_url(project_id: str, clip_id: str) -> str:
     base = config.RENDER_BASE_URL.rstrip("/")
     return f"{base}/?render=1&project={project_id}&clip={clip_id}"
@@ -212,11 +234,14 @@ def render_clip(project: dict, clip: dict, out_path: Path,
     source = store.source_path(project)
     url = _render_url(project["id"], clip["id"])
 
-    # Scalars are known from the project/clip (the page computes frameCount the
-    # same way) — only the pixel geometry (w/h) is read per worker from the page.
+    # Scalars are known here from the project/clip — only the pixel geometry
+    # (w/h) is read per worker from the page. The backend drives the capture loop
+    # (seek(t) per frame), so the padded end below is authoritative; the page's
+    # own frameCount is only used for its meta.
     fps = float(project.get("fps") or 30)
     start = float(clip["start"])
-    dur = max(float(clip["end"]) - start, 0.05)
+    end = _export_end(project, float(clip["end"]))
+    dur = max(end - start, 0.05)
     frame_count = max(1, round(dur * fps))
     workers = max(1, min(config.RENDER_PARALLELISM, frame_count))
 
